@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/schema#",
+  "contentVersion": "1.0.0.0",
+  "ConfigurationName": "PROD",
+  "ApplicationName": "contoso",
+  "FarmName": "SEARCH",
+  "Domain": "contoso.com",
+  "StoredCredential": "PROD-ADM",
+  "Binaries": {
+    "SetupFullPath": "\\\\srvfileshared.contoso.com\\cumulativeupdates",
+    "SetupFileName": [
+      "sts2019-kb5002630-fullfile-x64-glb.exe",
+      "wssloc2019-kb5002597-fullfile-x64-glb.exe"
+    ],
+    "ShutdownServices": false
+  },
+  "UpgradeContentDatabase": false,
+  "SideBySideToken": {
+    "Enable": false,
+    "BuildVersion": ""
+  }
+}

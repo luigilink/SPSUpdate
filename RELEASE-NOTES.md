@@ -1,6 +1,6 @@
 # SPSUpdate - Release Notes
 
-## [Unreleased] - 2024-11-12
+## [1.0.0] - 2024-11-20
 
 ### Changed
 
@@ -26,5 +26,11 @@
 - Add CONTRIBUTING.md file
 - Add release.yml file
 - Add scripts folder with first version of SPSUpdate
+- Wiki Documentation in repository - Add :
+  - wiki/Configuration.md
+  - wiki/Getting-Started.md
+  - wiki/Home.md
+  - wiki/Usage.md
+  - .github/workflows/wiki.yml
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)

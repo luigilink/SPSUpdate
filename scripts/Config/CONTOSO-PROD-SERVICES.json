@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/schema#",
+  "contentVersion": "1.0.0.0",
+  "ConfigurationName": "PROD",
+  "ApplicationName": "contoso",
+  "FarmName": "SERVICES",
+  "Domain": "contoso.com",
+  "StoredCredential": "PROD-ADM",
+  "Binaries": {
+    "SetupFullPath": "\\\\srvfileshared.contoso.com\\cumulativeupdates",
+    "SetupFileName": [
+      "sts-subscription-kb5002191-fullfile-x64-glb.exe",
+      "wssloc-subscription-kb5002110-fullfile-x64-glb.exe"
+    ],
+    "ShutdownServices": true
+  },
+  "UpgradeContentDatabase": false,
+  "SideBySideToken": {
+    "Enable": false,
+    "BuildVersion": ""
+  }
+}

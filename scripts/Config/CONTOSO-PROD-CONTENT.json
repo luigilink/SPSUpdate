@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/schema#",
+  "contentVersion": "1.0.0.0",
+  "ConfigurationName": "PROD",
+  "ApplicationName": "contoso",
+  "FarmName": "CONTENT",
+  "Domain": "contoso.com",
+  "StoredCredential": "PROD-ADM",
+  "Binaries": {
+    "SetupFullPath": "\\\\srvfileshared.contoso.com\\cumulativeupdates",
+    "SetupFileName": ["uber-subscription-kb5002651-fullfile-x64-glb.exe"],
+    "ShutdownServices": true
+  },
+  "UpgradeContentDatabase": true,
+  "SideBySideToken": {
+    "Enable": true,
+    "BuildVersion": "16.0.17928.20238"
+  }
+}
