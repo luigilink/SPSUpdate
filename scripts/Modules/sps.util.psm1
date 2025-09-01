@@ -34,7 +34,7 @@ function Start-SPSConfigExe {
     # Check if all servers are on the same patch level before running psconfig.exe 
     $unpatchedServers = Get-SPSServersPatchStatus | Where-Object { $_.Status -ne "UpgradeRequired" -and $_.Status -ne "UpgradeAvailable" }
     if ($unpatchedServers.Count -eq 0) {
-        Write-Verbose -Message "All servers are on the same patch level. Running PSConfig ..."
+        Write-Output "All servers are on the same patch level. Running PSConfig ..."
         # Check which version of SharePoint is installed
         $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
         $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
@@ -57,8 +57,8 @@ function Start-SPSConfigExe {
         # Determine if LanguagePackInstalled=1 or SetupType=B2B_Upgrade.
         # If so, the Config Wizard is required
         if (($languagePackInstalled.LanguagePackInstalled -eq 1) -or ($setupType.SetupType -eq "B2B_UPGRADE")) {
-            Write-Verbose -Message "Starting Configuration Wizard"
-            Write-Verbose -Message "Starting 'Product Version Job' timer job"
+            Write-Output "Starting Configuration Wizard"
+            Write-Output "Starting 'Product Version Job' timer job"
             $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
             $lastRunTime = $pvTimerJob.LastRunTime
 
@@ -67,7 +67,7 @@ function Start-SPSConfigExe {
             $jobRunning = $true
             $maxCount = 30
             $count = 0
-            Write-Verbose -Message "Waiting for 'Product Version Job' timer job to complete"
+            Write-Output "Waiting for 'Product Version Job' timer job to complete"
             while ($jobRunning -and $count -le $maxCount) {
                 Start-Sleep -Seconds 10
 
@@ -93,16 +93,16 @@ function Start-SPSConfigExe {
             Remove-Item -Path $stdOutTempFile
 
             if ($null -ne $cmdOutput) {
-                Write-Verbose -Message $cmdOutput.Trim()
+                Write-Output $cmdOutput.Trim()
             }
 
-            Write-Verbose -Message "PSConfig Exit Code: $($psconfig.ExitCode)"
+            Write-Output "PSConfig Exit Code: $($psconfig.ExitCode)"
             return $psconfig.ExitCode
         }
         # Error codes: https://aka.ms/installerrorcodes
         switch ($result) {
             0 {
-                Write-Verbose -Message "SharePoint Post Setup Configuration Wizard ran successfully"
+                Write-Output "SharePoint Post Setup Configuration Wizard ran successfully"
             }
             Default {
                 $message = ("SharePoint Post Setup Configuration Wizard failed, " + `
@@ -111,13 +111,13 @@ function Start-SPSConfigExe {
                 throw $message
             }
             $null {
-                Write-Verbose -Message "No need to run SharePoint Post Setup Configuration Wizard"
+                Write-Output "No need to run SharePoint Post Setup Configuration Wizard"
             }
         }
     }
     else {
-        Write-Verbose -Message "There are still some unpatched servers. Skipping running PSConfig!"
-        Write-Verbose -Message "The following servers aren't on the correct patch level: $($unpatchedServers -join ", ")"
+        Write-Output "There are still some unpatched servers. Skipping running PSConfig!"
+        Write-Output "The following servers aren't on the correct patch level: $($unpatchedServers -join ", ")"
     }
 }
 
@@ -142,7 +142,7 @@ function Start-SPSConfigExeRemote {
         # Check if all servers are on the same patch level before running psconfig.exe 
         $unpatchedServers = Get-SPSServersPatchStatus | Where-Object { $_.Status -ne "UpgradeRequired" -and $_.Status -ne "UpgradeAvailable" }
         if ($unpatchedServers.Count -eq 0) {
-            Write-Verbose -Message "All servers are on the same patch level. Running PSConfig ..."
+            Write-Output "All servers are on the same patch level. Running PSConfig ..."
             # Check which version of SharePoint is installed
             $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
             $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
@@ -165,8 +165,8 @@ function Start-SPSConfigExeRemote {
             # Determine if LanguagePackInstalled=1 or SetupType=B2B_Upgrade.
             # If so, the Config Wizard is required
             if (($languagePackInstalled.LanguagePackInstalled -eq 1) -or ($setupType.SetupType -eq "B2B_UPGRADE")) {
-                Write-Verbose -Message "Starting Configuration Wizard"
-                Write-Verbose -Message "Starting 'Product Version Job' timer job"
+                Write-Output "Starting Configuration Wizard"
+                Write-Output "Starting 'Product Version Job' timer job"
                 $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
                 $lastRunTime = $pvTimerJob.LastRunTime
 
@@ -175,7 +175,7 @@ function Start-SPSConfigExeRemote {
                 $jobRunning = $true
                 $maxCount = 30
                 $count = 0
-                Write-Verbose -Message "Waiting for 'Product Version Job' timer job to complete"
+                Write-Output "Waiting for 'Product Version Job' timer job to complete"
                 while ($jobRunning -and $count -le $maxCount) {
                     Start-Sleep -Seconds 10
 
@@ -201,10 +201,10 @@ function Start-SPSConfigExeRemote {
                 Remove-Item -Path $stdOutTempFile
 
                 if ($null -ne $cmdOutput) {
-                    Write-Verbose -Message $cmdOutput.Trim()
+                    Write-Output $cmdOutput.Trim()
                 }
 
-                Write-Verbose -Message "PSConfig Exit Code: $($psconfig.ExitCode)"
+                Write-Output "PSConfig Exit Code: $($psconfig.ExitCode)"
                 return $psconfig.ExitCode
             }
             else {
@@ -214,7 +214,7 @@ function Start-SPSConfigExeRemote {
         # Error codes: https://aka.ms/installerrorcodes
         switch ($result) {
             0 {
-                Write-Verbose -Message "SharePoint Post Setup Configuration Wizard ran successfully"
+                Write-Output "SharePoint Post Setup Configuration Wizard ran successfully"
             }
             Default {
                 $message = ("SharePoint Post Setup Configuration Wizard failed, " + `
@@ -223,13 +223,13 @@ function Start-SPSConfigExeRemote {
                 throw $message
             }
             $null {
-                Write-Verbose -Message "No need to run SharePoint Post Setup Configuration Wizard"
+                Write-Output "No need to run SharePoint Post Setup Configuration Wizard"
             }
         }
     }
     else {
-        Write-Verbose -Message "There are still some unpatched servers. Skipping running PSConfig!"
-        Write-Verbose -Message "The following servers aren't on the correct patch level: $($unpatchedServers -join ", ")"
+        Write-Output "There are still some unpatched servers. Skipping running PSConfig!"
+        Write-Output "The following servers aren't on the correct patch level: $($unpatchedServers -join ", ")"
     }
 }
 
@@ -244,21 +244,21 @@ function Update-SPSContentDatabase {
 
     $getSPContentDb = Get-SPContentDatabase -Identity $Name -ErrorAction SilentlyContinue
     if ($null -ne $getSPContentDb) {
-        Write-Verbose -Message "Checking Upgrading status for $($Name) ..."
+        Write-Output "Checking Upgrading status for $($Name) ..."
         if ($getSPContentDb.NeedsUpgrade) {
-            Write-Verbose -Message "Upgrading SharePoint SPContentDatabase $($Name)"
+            Write-Output "Upgrading SharePoint SPContentDatabase $($Name)"
             $updateStarted = Get-date
-            Write-Verbose -Message "Started at $updateStarted - Please Wait ..."
+            Write-Output "Started at $updateStarted - Please Wait ..."
             Upgrade-SPContentDatabase $Name -Confirm:$false -Verbose
             $updateFinished = Get-date
-            Write-Verbose -Message "Update for SharePoint SPContentDatabase $($Name) is finished at $updateFinished"
+            Write-Output "Update for SharePoint SPContentDatabase $($Name) is finished at $updateFinished"
         }
         else {
-            Write-Verbose -Message "SPContentDatabase $($Name) already upgraded - No action needed"
+            Write-Output "SPContentDatabase $($Name) already upgraded - No action needed"
         }
     }
     else {
-        Write-Verbose -Message "SPContentDatabase $($Name) does not exist - No action needed"
+        Write-Output "SPContentDatabase $($Name) does not exist - No action needed"
     }
 
 }

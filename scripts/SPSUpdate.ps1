@@ -34,8 +34,8 @@
     .NOTES
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
-    Date:		April 20, 2022
-    Version:	1.0.0
+    Date:		August 19, 2025
+    Version:	1.0.1
 
     .LINK
     https://spjc.fr/
@@ -107,20 +107,22 @@ catch {
 }
 
 # Define variables
-$SPSUpdateVersion = '1.0.0'
-$getDateFormatted = Get-Date -Format yyyy-MM-dd
-$spsUpdateFileName = "$($Application)-$($Environment)-$($getDateFormatted)"
+$SPSUpdateVersion = '1.0.1'
+$getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
+$spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
 $currentUser = ([Security.Principal.WindowsIdentity]::GetCurrent()).Name
 $pathLogsFolder = Join-Path -Path $scriptRootPath -ChildPath 'Logs'
 $pathConfigFolder = Join-Path -Path $scriptRootPath -ChildPath 'Config'
+$fullScriptPath = Join-Path -Path $scriptRootPath -ChildPath 'SPSUpdate.ps1'
+$spsUpdateDBsPath = Join-Path -Path $pathConfigFolder -ChildPath $spsUpdateDBsFile
 
 # Initialize logs
 if (-Not (Test-Path -Path $pathLogsFolder)) {
     New-Item -ItemType Directory -Path $pathLogsFolder -Force
 }
 if ($Sequence) {
-    $pathLogFile = Join-Path -Path $pathlogFolder -ChildPath ("$($spsUpdateFileName)$($Sequence)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
+    $pathLogFile = Join-Path -Path $pathlogsFolder -ChildPath ("$($Application)-$($Environment)_Sequence$($Sequence)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
 }
 else {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ($spsUpdateFileName + '.log')
@@ -172,15 +174,15 @@ try {
             # If the path does not exist, create the directory
             New-Item -ItemType Directory -Path $pathConfigFolder
         }
-        if (Test-Path $spsUpdateDBsFile) {
+        if (Test-Path $spsUpdateDBsPath) {
             Write-Output "Get ContentDatabase json file for SPFARM: $($spFarmName)"
-            $jsonDbCfg = Get-Content $spsUpdateDBsFile | ConvertFrom-Json
+            $jsonDbCfg = Get-Content $spsUpdateDBsPath | ConvertFrom-Json
         }
         else {
             # Initialize contentDb json file
             "Initialize ContentDatabase json file for SPFARM: $($spFarmName)"
-            Initialize-SPSContentDbJsonFile -Path $spsUpdateDBsFile
-            $jsonDbCfg = Get-Content $spsUpdateDBsFile | ConvertFrom-Json
+            Initialize-SPSContentDbJsonFile -Path $spsUpdateDBsPath
+            $jsonDbCfg = Get-Content $spsUpdateDBsPath | ConvertFrom-Json
         }
     }
 }
@@ -226,11 +228,13 @@ Exception: $_
             }
             # Add scheduled Task for Update Full Script
             try {
+                # Initialize ActionArguments parameter
+                $ActionArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Verbose"
                 Write-Output 'Adding Scheduled Task SPSUpdate-FullScript in SharePoint Task Path'
                 Add-SPSScheduledTask -Name 'SPSUpdate-FullScript' `
                     -Description 'Scheduled Task for Update SharePoint Server after installation of cumulative update' `
-                    -PSArguments "-ConfigFile $ConfigFile -Verbose" `
-                    -StartTime '23:55:00'
+                    -ActionArguments $ActionArguments `
+                    -ExecuteAsCredential $InstallAccount
             }
             catch {
                 # Handle errors during Add scheduled Task for Update Full Script
@@ -314,10 +318,13 @@ Exception: $_
             # Add scheduled Task for Upgrade SPContentDatabase in Parallel
             foreach ($taskId in (1..4)) {
                 try {
+                    # Initialize ActionArguments parameter
+                    $ActionArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Sequence $taskId -Verbose"
                     Write-Output "Adding Scheduled Tasks SPSUpdate-Sequence$taskId in SharePoint Task Path"
                     Add-SPSScheduledTask -Name "SPSUpdate-Sequence$taskId" `
                         -Description "Scheduled Task Sequence$taskId for Update SharePoint Server after installation of cumulative update" `
-                        -PSArguments "-ConfigFile $ConfigFile -Sequence $taskId -Verbose"
+                        -ActionArguments $ActionArguments `
+                        -ExecuteAsCredential $ADM
                 }
                 catch {
                     # Handle errors during Add scheduled Task for Update Full Script
