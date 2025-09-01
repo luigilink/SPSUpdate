@@ -1,6 +1,6 @@
 # SPSUpdate - SharePoint Cumulative Update Tool
 
-SPSUpdate is a PowerShell script designed to gather SharePoint Server farm information and send it via email. It helps administrators monitor the health of their SharePoint environments through customizable checks and SMTP notifications.
+SPSUpdate is a PowerShell script tool designed to install cumulative updates and run SPConfig.exe in your SharePoint environment.
 
 ## Key Features
 

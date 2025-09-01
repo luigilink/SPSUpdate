@@ -31,7 +31,7 @@ In the above example, `$CredSSPDelegates` can be a wildcard name (such as "\*.co
 3. Add the script in task scheduler by running the following command:
 
 ```powershell
-.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Install -InstallAccount (Get-Credential)
+.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action Install -InstallAccount (Get-Credential)
 ```
 
 > [!IMPORTANT]

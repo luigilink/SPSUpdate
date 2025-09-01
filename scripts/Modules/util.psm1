@@ -1,7 +1,16 @@
 #region Import Modules
 # Import the custom module 'sps.util.psm1' from the script's directory
-$scriptModulePath = Split-Path -Parent $MyInvocation.MyCommand.Definition
-Import-Module -Name (Join-Path -Path $scriptModulePath -ChildPath 'sps.util.psm1') -Force
+try {
+    Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'sps.util.psm1') -Force
+}
+catch {
+    # Handle errors during Import of helper module
+    Write-Error -Message @"
+Failed to import sps.util.psm1 module from path: $($script:PSScriptRoot)
+Exception: $_
+"@
+    Exit
+}
 #endregion
 
 function Get-SPSInstalledProductVersion {
@@ -11,10 +20,10 @@ function Get-SPSInstalledProductVersion {
     $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
     $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
     if ($null -eq $fullPath) {
-        throw 'SharePoint path {C:\Program Files\Common Files\microsoft shared\Web Server Extensions} does not exist'
+        Write-Error -Message 'SharePoint path {C:\Program Files\Common Files\microsoft shared\Web Server Extensions} does not exist'
     }
     else {
-        return (Get-Command $fullPath).FileVersionInfo
+        return ([System.Diagnostics.FileVersionInfo]::GetVersionInfo($fullPath.FullName)).FileVersion
     }
 }
 
@@ -24,28 +33,36 @@ function Invoke-SPSCommand {
         [Parameter(Mandatory = $true)]
         [System.Management.Automation.PSCredential]
         $Credential, # Credential to be used for executing the command
-        
+
         [Parameter()]
         [Object[]]
         $Arguments, # Optional arguments for the script block
-        
+
         [Parameter(Mandatory = $true)]
         [ScriptBlock]
         $ScriptBlock, # Script block containing the commands to execute
-        
+
         [Parameter(Mandatory = $true)]
         [System.String]
         $Server # Target server where the commands will be executed
     )
     $VerbosePreference = 'Continue'
     # Base script to ensure the SharePoint snap-in is loaded
-    $baseScript = @"
-    if (`$null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue))
+    $installedVersion = Get-SPSInstalledProductVersion
+    if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999)
     {
-        Add-PSSnapin Microsoft.SharePoint.PowerShell
-    }
+        $baseScript = @"
+            if (`$null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue))
+            {
+                Add-PSSnapin Microsoft.SharePoint.PowerShell
+            }
 "@
-
+    }
+    else
+    {
+        $baseScript = ''
+    }
+    # Prepare the arguments for Invoke-Command
     $invokeArgs = @{
         ScriptBlock = [ScriptBlock]::Create($baseScript + $ScriptBlock.ToString())
     }
@@ -86,54 +103,6 @@ function Invoke-SPSCommand {
                 Remove-PSSession -Session $session
             }
         }
-    }
-}
-
-function Clear-SPSLog {
-    param (
-        [Parameter(Mandatory = $true)]
-        [System.String]
-        $path, # Path to the log files
-
-        [Parameter()]
-        [System.UInt32]
-        $Retention = 180 # Number of days to retain log files
-    )
-    # Check if the log file path exists
-    if (Test-Path $path) {
-        # Get the current date
-        $Now = Get-Date
-        # Define LastWriteTime parameter based on $Retention
-        $LastWrite = $Now.AddDays(-$Retention)
-        # Get files based on last write filter and specified folder
-        $files = Get-ChildItem -Path $path -Filter "$($logFileName)*" | Where-Object -FilterScript {
-            $_.LastWriteTime -le "$LastWrite"
-        }
-        # If files are found, proceed to delete them
-        if ($files) {
-            Write-Output '--------------------------------------------------------------'
-            Write-Output "Cleaning log files in $path ..."
-            foreach ($file in $files) {
-                if ($null -ne $file) {
-                    Write-Output "Deleting file $file ..."
-                    Remove-Item $file.FullName | Out-Null
-                }
-                else {
-                    Write-Output 'No more log files to delete'
-                    Write-Output '--------------------------------------------------------------'
-                }
-            }
-        }
-        else {
-            Write-Output '--------------------------------------------------------------'
-            Write-Output "$path - No needs to delete log files"
-            Write-Output '--------------------------------------------------------------'
-        }
-    }
-    else {
-        Write-Output '--------------------------------------------------------------'
-        Write-Output "$path does not exist"
-        Write-Output '--------------------------------------------------------------'
     }
 }
 

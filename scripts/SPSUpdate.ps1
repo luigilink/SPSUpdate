@@ -10,32 +10,31 @@
     Need parameter ConfigFile, example:
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json'
 
+    .PARAMETER Action
+    Use the Action parameter equal to Install if you want to add the SPSUpdate script in taskscheduler
+    InstallAccount parameter need to be set
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action Install -InstallAccount (Get-Credential)
+
+    Use the Action parameter equal to Uninstall if you want to remove the SPSUpdate script from taskscheduler
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action Uninstall
+
     .PARAMETER Sequence
     Need parameter Sequence for SPS Farm, example:
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Sequence 1
-
-    .PARAMETER Install
-    Use the switch Install parameter if you want to add the SPSUpdate script in taskscheduler
-    InstallAccount parameter need to be set
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
 
     .PARAMETER InstallAccount
     Need parameter InstallAccount when you use the switch Install parameter
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
 
-    .PARAMETER Uninstall
-    Use the switch Uninstall parameter if you want to remove the SPSUpdate script from taskscheduler
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Uninstall
-
     .EXAMPLE
-    SPSUpdate.ps1 -Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
-    SPSUpdate.ps1 -Uninstall -ConfigFile 'contoso-PROD.json'
+    SPSUpdate.ps1 -Action Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
+    SPSUpdate.ps1 -Action -Uninstall -ConfigFile 'contoso-PROD.json'
 
     .NOTES
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
-    Date:		August 19, 2025
-    Version:	1.0.1
+    Date:		September 02, 2025
+    Version:	2.0.0
 
     .LINK
     https://spjc.fr/
@@ -43,10 +42,15 @@
 #>
 param
 (
-    [Parameter(Position = 1, Mandatory = $true)]
+    [Parameter(Position = 0, Mandatory = $true)]
     [ValidateScript({ (Test-Path $_) -and ($_ -like '*.json') })]
     [System.String]
     $ConfigFile, # Path to the configuration file
+
+    [Parameter(Position = 1)]
+    [validateSet('Install', 'Uninstall', 'Default', 'ProductUpdate', IgnoreCase = $true)]
+    [System.String]
+    $Action = 'Default',
 
     [Parameter(Position = 2)]
     [ValidateRange(1, 4)]
@@ -54,16 +58,8 @@ param
     $Sequence,
 
     [Parameter(Position = 3)]
-    [switch]
-    $Install, # Switch parameter to add scheduled tasks
-
-    [Parameter(Position = 4)]
     [System.Management.Automation.PSCredential]
-    $InstallAccount, # Credential for the InstallAccount
-
-    [Parameter(Position = 5)]
-    [switch]
-    $Uninstall # Switch parameter to remove scheduled tasks
+    $InstallAccount # Credential for the InstallAccount (when Action is Install)
 )
 
 #region Initialization
@@ -74,14 +70,34 @@ Clear-Host
 $Host.UI.RawUI.WindowTitle = "SPSTrust script running on $env:COMPUTERNAME"
 
 # Define the path to the helper module
-$scriptRootPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$script:HelperModulePath = Join-Path -Path $scriptRootPath -ChildPath 'Modules'
+$script:HelperModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'Modules'
 
 # Import the helper module
-Import-Module -Name (Join-Path -Path $script:HelperModulePath -ChildPath 'util.psm1') -Force
+try {
+    Import-Module -Name (Join-Path -Path $script:HelperModulePath -ChildPath 'util.psm1') -Force
+}
+catch {
+    # Handle errors during Import of helper module
+    Write-Error -Message @"
+Failed to import helper module from path: $($script:HelperModulePath)
+Exception: $_
+"@
+    Exit
+}
+
 
 # Import the credentialmanager module
-Import-Module -Name (Join-Path -Path (Join-Path -Path $script:HelperModulePath -ChildPath 'credentialmanager') -ChildPath 'CredentialManager.psd1') -Force
+try {
+    Import-Module -Name (Join-Path -Path (Join-Path -Path $script:HelperModulePath -ChildPath 'credentialmanager') -ChildPath 'CredentialManager.psd1') -Force
+}
+catch {
+    # Handle errors during Import of credentialmanager module
+    Write-Error -Message @"
+Failed to import credentialmanager module from path: $(Join-Path -Path $script:HelperModulePath -ChildPath 'credentialmanager')
+Exception: $_
+"@
+    Exit
+}
 
 # Ensure the script is running with administrator privileges
 if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')) {
@@ -112,23 +128,23 @@ $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
 $currentUser = ([Security.Principal.WindowsIdentity]::GetCurrent()).Name
-$pathLogsFolder = Join-Path -Path $scriptRootPath -ChildPath 'Logs'
-$pathConfigFolder = Join-Path -Path $scriptRootPath -ChildPath 'Config'
-$fullScriptPath = Join-Path -Path $scriptRootPath -ChildPath 'SPSUpdate.ps1'
+$pathLogsFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Logs'
+$pathConfigFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Config'
+$fullScriptPath = Join-Path -Path $PSScriptRoot -ChildPath 'SPSUpdate.ps1'
 $spsUpdateDBsPath = Join-Path -Path $pathConfigFolder -ChildPath $spsUpdateDBsFile
 
 # Initialize logs
 if (-Not (Test-Path -Path $pathLogsFolder)) {
     New-Item -ItemType Directory -Path $pathLogsFolder -Force
 }
-if ($Sequence) {
-    $pathLogFile = Join-Path -Path $pathlogsFolder -ChildPath ("$($Application)-$($Environment)_Sequence$($Sequence)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
+if ($PSBoundParameters.ContainsKey('Sequence')) {
+    $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_Sequence$($Sequence)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
 }
 else {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ($spsUpdateFileName + '.log')
 }
 $DateStarted = Get-Date
-$psVersion = ($Host).Version.ToString()
+$psVersion = $PSVersionTable.PSVersion.ToString()
 
 # Start transcript to log the output
 Start-Transcript -Path $pathLogFile -IncludeInvocationHeader
@@ -150,6 +166,7 @@ Start-Process -FilePath "$env:SystemRoot\system32\powercfg.exe" -ArgumentList '/
 # 1. Load SharePoint Powershell Snapin or Import-Module
 try {
     $installedVersion = Get-SPSInstalledProductVersion
+        Write-Output "Installed SharePoint Product Version: $($installedVersion)"
     if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999) {
         if ($null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue)) {
             Add-PSSnapin Microsoft.SharePoint.PowerShell
@@ -194,270 +211,280 @@ Exception: $_
 "@
 }
 
-# Check UserName and Password if Install parameter is used
-if ($Install) {
-    if ($null -eq $InstallAccount) {
-        Write-Warning -Message ('SPSUpdate: Install parameter is set. Please set also InstallAccount ' + `
-                "parameter. `nSee https://github.com/luigilink/SPSUpdate/wiki for details.")
-        Break
+# 3. Execute Action parameter
+switch ($Action) {
+    'Uninstall' {
+        # Remove scheduled Task for Update Full Script
+        try {
+            Write-Output 'Removing Scheduled Task SPSUpdate-FullScript in SharePoint Task Path'
+            Remove-SPSScheduledTask -Name 'SPSUpdate-FullScript'
+            foreach ($taskId in (1..4)) {
+                Write-Output "Removing Scheduled Tasks SPSUpdate-Sequence$taskId in SharePoint Task Path"
+                Remove-SPSScheduledTask -Name "SPSUpdate-Sequence$taskId"
+            }
+        }
+        catch {
+            # Handle errors during Remove scheduled Task for Update Full Script
+            Write-Error -Message @"
+Failed to Remove Scheduled Task in SharePoint Task Path for SPFarm: $($spFarmName)
+Exception: $_
+"@
+        }
+        # Remove Credential from Credential Manager
+        try {
+            $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
+            if ($null -ne $credential) {
+                Remove-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)"
+            }
+        }
+        catch {
+            # Handle errors during Get or Remove Credential in Crededential Manager
+            Write-Error -Message @"
+Failed to Get or Remove Credential in Crededential Manager for SPFarm: $($spFarmName)
+Exception: $_
+"@
+        }
     }
-    else {
-        $UserName = $InstallAccount.UserName
-        $Password = $InstallAccount.GetNetworkCredential().Password
-        $currentDomain = 'LDAP://' + ([ADSI]'').distinguishedName
-        Write-Output "Checking Account `"$UserName`" ..."
-        $dom = New-Object System.DirectoryServices.DirectoryEntry($currentDomain, $UserName, $Password)
-        if ($null -eq $dom.Path) {
-            Write-Warning -Message "Password Invalid for user:`"$UserName`""
-            Break
+    'Install' {
+        # Check UserName and Password if Install parameter is used
+        if ($null -eq $InstallAccount) {
+            Write-Warning -Message ('SPSUpdate: Install parameter is set. Please set also InstallAccount ' + `
+                "parameter. `nSee https://github.com/luigilink/SPSUpdate/wiki for details.")
+            exit
         }
         else {
-            # Add Credential in Credential Manager
-            try {
-                $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
-                if ($null -eq $credential) {
-                    New-StoredCredential -Credentials $InstallAccount -Target "$($jsonEnvCfg.StoredCredential)" -Type Generic -Persist LocalMachine
-                }
+            $UserName = $InstallAccount.UserName
+            $Password = $InstallAccount.GetNetworkCredential().Password
+            $currentDomain = 'LDAP://' + ([ADSI]'').distinguishedName
+            Write-Output "Checking Account `"$UserName`" ..."
+            $dom = New-Object System.DirectoryServices.DirectoryEntry($currentDomain, $UserName, $Password)
+            if ($null -eq $dom.Path) {
+                Write-Warning -Message "Password Invalid for user:`"$UserName`""
+                exit
             }
-            catch {
-                # Handle errors during Get or Add Credential in Crededential Manager
-                Write-Error -Message @"
+            else {
+                # Add Credential in Credential Manager
+                try {
+                    $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
+                    if ($null -eq $credential) {
+                        New-StoredCredential -Credentials $InstallAccount -Target "$($jsonEnvCfg.StoredCredential)" -Type Generic -Persist LocalMachine
+                    }
+                }
+                catch {
+                    # Handle errors during Get or Add Credential in Crededential Manager
+                    Write-Error -Message @"
 Failed to Get or Add Credential in Crededential Manager for SPFarm: $($spFarmName)
 Exception: $_
 "@
-            }
-            # Add scheduled Task for Update Full Script
-            try {
-                # Initialize ActionArguments parameter
-                $ActionArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Verbose"
-                Write-Output 'Adding Scheduled Task SPSUpdate-FullScript in SharePoint Task Path'
-                Add-SPSScheduledTask -Name 'SPSUpdate-FullScript' `
-                    -Description 'Scheduled Task for Update SharePoint Server after installation of cumulative update' `
-                    -ActionArguments $ActionArguments `
-                    -ExecuteAsCredential $InstallAccount
-            }
-            catch {
-                # Handle errors during Add scheduled Task for Update Full Script
+                }
+                # Add scheduled Task for Update Full Script
+                try {
+                    # Initialize ActionArguments parameter
+                    $ActionArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Verbose"
+                    Write-Output 'Adding Scheduled Task SPSUpdate-FullScript in SharePoint Task Path'
+                    Add-SPSScheduledTask -Name 'SPSUpdate-FullScript' `
+                        -Description 'Scheduled Task for Update SharePoint Server after installation of cumulative update' `
+                        -ActionArguments $ActionArguments `
+                        -ExecuteAsCredential $InstallAccount
+                }
+                catch {
+                    # Handle errors during Add scheduled Task for Update Full Script
                 Write-Error -Message @"
 Failed to Add Scheduled Task in SharePoint Task Path for SPFarm: $($spFarmName)
 Exception: $_
 "@
+                }
             }
         }
     }
-}
-elseif ($Uninstall) {
-    # Remove scheduled Task for Update Full Script
-    try {
-        Write-Output 'Removing Scheduled Task SPSUpdate-FullScript in SharePoint Task Path'
-        Remove-SPSScheduledTask -Name 'SPSUpdate-FullScript'
-        foreach ($taskId in (1..4)) {
-            Write-Output "Removing Scheduled Tasks SPSUpdate-Sequence$taskId in SharePoint Task Path"
-            Remove-SPSScheduledTask -Name "SPSUpdate-Sequence$taskId"
-        }
-    }
-    catch {
-        # Handle errors during Remove scheduled Task for Update Full Script
-        Write-Error -Message @"
-Failed to Remove Scheduled Task in SharePoint Task Path for SPFarm: $($spFarmName)
-Exception: $_
-"@
-    }
-    # Remove Credential from Credential Manager
-    try {
-        $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
-        if ($null -ne $credential) {
-            Remove-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)"
-        }
-    }
-    catch {
-        # Handle errors during Get or Remove Credential in Crededential Manager
-        Write-Error -Message @"
-Failed to Get or Remove Credential in Crededential Manager for SPFarm: $($spFarmName)
-Exception: $_
-"@
-    }
-
-}
-else {
-    if ($Sequence -ne 0) {
-        try {
-            Write-Output "Update Script in progress | Sequence $Sequence  - Please Wait ..."
-            switch ($Sequence) {
-                1 { $dbs = $jsonDbCfg.SPContentDatabase1 }
-                2 { $dbs = $jsonDbCfg.SPContentDatabase2 }
-                3 { $dbs = $jsonDbCfg.SPContentDatabase3 }
-                4 { $dbs = $jsonDbCfg.SPContentDatabase4 }
+    Default {
+    if ($PSBoundParameters.ContainsKey('Sequence')) {
+            try {
+                Write-Output "Update Script in progress | Sequence $Sequence  - Please Wait ..."
+                switch ($Sequence) {
+                    1 { $dbs = $jsonDbCfg.SPContentDatabase1 }
+                    2 { $dbs = $jsonDbCfg.SPContentDatabase2 }
+                    3 { $dbs = $jsonDbCfg.SPContentDatabase3 }
+                    4 { $dbs = $jsonDbCfg.SPContentDatabase4 }
+                }
+                foreach ($db in $dbs) {
+                    Update-SPSContentDatabase -Name $db.Name
+                }
             }
-            foreach ($db in $dbs) {
-                Update-SPSContentDatabase -Name $db.Name
-            }
-        }
-        catch {
-            # Handle errors during Update Script Sequence
-            Write-Error -Message @"
+            catch {
+                # Handle errors during Update Script Sequence
+                Write-Error -Message @"
 Failed to Upgrade SPContentDatabse '$($db.Name)' during sequence: $($Sequence)
 Target SPFarm: $($spFarmName)
 Exception: $_
 "@
-        }
+            }
 
-    }
-    else {
-        # Initialize Security
-        $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
-        if ($null -ne $credential) {
-            New-Variable -Name 'ADM' -Value $credential -Force
         }
         else {
-            Throw "The Target $($jsonEnvCfg.StoredCredential) not present in Credential Manager. Please contact your administrator."
-        }
-        Write-Output "Update Script in progress | FULL Mode - Please Wait ..."
-        # Update SPContentDatabase
-        if ($jsonEnvCfg.UpgradeContentDatabase) {
-            # Add scheduled Task for Upgrade SPContentDatabase in Parallel
-            foreach ($taskId in (1..4)) {
-                try {
-                    # Initialize ActionArguments parameter
-                    $ActionArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Sequence $taskId -Verbose"
-                    Write-Output "Adding Scheduled Tasks SPSUpdate-Sequence$taskId in SharePoint Task Path"
-                    Add-SPSScheduledTask -Name "SPSUpdate-Sequence$taskId" `
-                        -Description "Scheduled Task Sequence$taskId for Update SharePoint Server after installation of cumulative update" `
-                        -ActionArguments $ActionArguments `
-                        -ExecuteAsCredential $ADM
-                }
-                catch {
-                    # Handle errors during Add scheduled Task for Update Full Script
-                    Write-Error -Message @"
+            # Initialize Security
+            try {
+                $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)"
+            }
+            catch {
+                # Handle errors during Update Script Sequence
+                Write-Error -Message @"
+Failed to initialize Security from Crededential Manager
+The Target $($jsonEnvCfg.StoredCredential) not present in Credential Manager
+Please review your configuration file or contact your administrator.
+Exception: $_
+"@
+                Stop-Transcript
+                exit
+            }
+            Write-Output "Update Script in progress | FULL Mode - Please Wait ..."
+            # Update SPContentDatabase
+            if ($jsonEnvCfg.UpgradeContentDatabase) {
+                # Add scheduled Task for Upgrade SPContentDatabase in Parallel
+                foreach ($taskId in (1..4)) {
+                    try {
+                        # Initialize ActionArguments parameter
+                        $ActionArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Sequence $taskId -Verbose"
+                        Write-Output "Adding Scheduled Tasks SPSUpdate-Sequence$taskId in SharePoint Task Path"
+                        Add-SPSScheduledTask -Name "SPSUpdate-Sequence$taskId" `
+                            -Description "Scheduled Task Sequence$taskId for Update SharePoint Server after installation of cumulative update" `
+                            -ActionArguments $ActionArguments `
+                            -ExecuteAsCredential $credential
+                    }
+                    catch {
+                        # Handle errors during Add scheduled Task for Update Full Script
+                        Write-Error -Message @"
 Failed to Add Scheduled Task in SharePoint Task Path
 Task Name: SPSUpdate-Sequence$taskId
 Target SPFarm: $($spFarmName)
 Exception: $_
 "@
+                        Stop-Transcript
+                        exit
+                    }
                 }
-            }
 
-            # Run scheduled Task for Upgrade SPContentDatabase in Parallel
-            foreach ($taskId in (1..4)) {
-                try {
-                    Write-Output "Running Scheduled Tasks SPSUpdate-Sequence$taskId in SharePoint Task Path"
-                    Start-SPSScheduledTask -Name "SPSUpdate-Sequence$taskId"
-                    Write-Output 'Avoid conflicts with OWSTimer process - Pause between 60 to 90 seconds'
-                    Start-Sleep -Seconds (get-random (60..90))
-                }
-                catch {
-                    # Handle errors during Start scheduled Task for Upgrade SPContentDatabase in Parallel
-                    Write-Error -Message @"
+                # Run scheduled Task for Upgrade SPContentDatabase in Parallel
+                foreach ($taskId in (1..4)) {
+                    try {
+                        Write-Output "Running Scheduled Tasks SPSUpdate-Sequence$taskId in SharePoint Task Path"
+                        Start-SPSScheduledTask -Name "SPSUpdate-Sequence$taskId"
+                        Write-Output 'Avoid conflicts with OWSTimer process - Pause between 60 to 90 seconds'
+                        Start-Sleep -Seconds (get-random (60..90))
+                    }
+                    catch {
+                        # Handle errors during Start scheduled Task for Upgrade SPContentDatabase in Parallel
+                        Write-Error -Message @"
 Failed to Start Scheduled Task in SharePoint Task Path
 Task Name: SPSUpdate-Sequence$taskId
 Target SPFarm: $($spFarmName)
 Exception: $_
 "@
+                    }
+
                 }
 
+                # Wait until all scheduled Tasks are finished
+                # Define list variable of scheduled tasks
+                $scheduledTasks = @('SPSUpdate-Sequence1', 'SPSUpdate-Sequence2', 'SPSUpdate-Sequence3', 'SPSUpdate-Sequence4')
+
+                # Continuously check the status of tasks until all are finished
+                $allTasksFinished = $false
+                while (-not $allTasksFinished) {
+                    $allTasksFinished = $true
+                    foreach ($scheduledTask in $scheduledTasks) {
+                        $taskStatus = Get-ScheduledTask -TaskName $scheduledTask | Select-Object State
+                        if ($taskStatus.State -ne 'Running') {
+                            Write-Output "Scheduled Task $($scheduledTask) has finished or is not running"
+                        }
+                        else {
+                            $allTasksFinished = $false
+                        }
+                    }
+                    if (-not $allTasksFinished) {
+                        Write-Output 'At least one taskg is still running. Waiting...'
+                        Start-Sleep -Seconds 10
+                    }
+                }
+                Write-Output "All Scheduled Tasks have finished"
             }
 
-            # Wait until all scheduled Tasks are finished
-            # Define list variable of scheduled tasks
-            $scheduledTasks = @('SPSUpdate-Sequence1', 'SPSUpdate-Sequence2', 'SPSUpdate-Sequence3', 'SPSUpdate-Sequence4')
-
-            # Continuously check the status of tasks until all are finished
-            $allTasksFinished = $false
-            while (-not $allTasksFinished) {
-                $allTasksFinished = $true
-                foreach ($scheduledTask in $scheduledTasks) {
-                    $taskStatus = Get-ScheduledTask -TaskName $scheduledTask | Select-Object State
-                    if ($taskStatus.State -ne 'Running') {
-                        Write-Output "Scheduled Task $($scheduledTask) has finished or is not running"
-                    }
-                    else {
-                        $allTasksFinished = $false
-                    }
-                }
-                if (-not $allTasksFinished) {
-                    Write-Output 'At least one taskg is still running. Waiting...'
-                    Start-Sleep -Seconds 10
-                }
+            # Run SPConfigWizard on Master SharePoint Server
+            try {
+                Write-Output "Getting status of Configuration Wizard on server: $($env:COMPUTERNAME)"
+                Start-SPSConfigExe
             }
-            Write-Output "All Scheduled Tasks have finished"
-        }
-
-        # Run SPConfigWizard on Master SharePoint Server
-        try {
-            Write-Output "Getting status of Configuration Wizard on server: $($env:COMPUTERNAME)"
-            Start-SPSConfigExe
-        }
-        catch {
-            # Handle errors during Run SPConfigWizard on Master SharePoint Server
-            Write-Error -Message @"
+            catch {
+                # Handle errors during Run SPConfigWizard on Master SharePoint Server
+                Write-Error -Message @"
 Failed to Run SPConfigWizard on Master SharePoint Server
 Target Server:  $($env:COMPUTERNAME)
 Target SPFarm: $($spFarmName)
 Exception: $_
 "@
-        }
-
-
-        # Run SPConfigWizard on other SharePoint Server
-        $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' -and $_.Address -ne "$($env:COMPUTERNAME)" }
-        foreach ($server in $spServers) {
-            try {
-                $spTargetServer = "$($server.Name).$($scriptFQDN)"
-                Write-Output "Getting status of Configuration Wizard on server: $($server.Name)"
-                Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $ADM
             }
-            catch {
-                # Handle errors during Run SPConfigWizard on remote SharePoint Server
-                Write-Error -Message @"
+
+
+            # Run SPConfigWizard on other SharePoint Server
+            $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' -and $_.Address -ne "$($env:COMPUTERNAME)" }
+            foreach ($server in $spServers) {
+                try {
+                    $spTargetServer = "$($server.Name).$($scriptFQDN)"
+                    Write-Output "Getting status of Configuration Wizard on server: $($server.Name)"
+                    Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
+                }
+                catch {
+                    # Handle errors during Run SPConfigWizard on remote SharePoint Server
+                    Write-Error -Message @"
 Failed to Run SPConfigWizard on Remote SharePoint Server
 Target Server:  $($spTargetServer)
 Target SPFarm: $($spFarmName)
 Exception: $_
 "@
+                }
             }
-        }
 
-        # Enable SideBySideToken and run Copy-SPSideBySideFiles on master server
-        if (-not([string]::IsNullOrEmpty($jsonEnvCfg.SideBySideToken.BuildVersion))) {
-            try {
-                Write-Output "Configuring SharePoint SideBySideToken on farm $($spFarmName)"
-                Set-SPSSideBySideToken -BuildVersion "$($jsonEnvCfg.SideBySideToken.BuildVersion)" -EnableSideBySide $jsonEnvCfg.SideBySideToken.Enable
-            }
-            catch {
-                # Handle errors during Run Set-SPSSideBySideToken
-                Write-Error -Message @"
+            # Enable SideBySideToken and run Copy-SPSideBySideFiles on master server
+            if (-not([string]::IsNullOrEmpty($jsonEnvCfg.SideBySideToken.BuildVersion))) {
+                try {
+                    Write-Output "Configuring SharePoint SideBySideToken on farm $($spFarmName)"
+                    Set-SPSSideBySideToken -BuildVersion "$($jsonEnvCfg.SideBySideToken.BuildVersion)" -EnableSideBySide $jsonEnvCfg.SideBySideToken.Enable
+                }
+                catch {
+                    # Handle errors during Run Set-SPSSideBySideToken
+                    Write-Error -Message @"
 Failed to Run Set-SPSSideBySideToken CmdLet
 Target SPFarm: $($spFarmName)
 Exception: $_
 "@
-            }
-        }
-
-        # Run Copy-SPSideBySideFiles on other servers
-        if ($jsonEnvCfg.SideBySideToken.Enable) {
-            $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' -and $_.Address -ne "$($env:COMPUTERNAME)" }
-            foreach ($server in $spServers) {
-                try {
-                    $spTargetServer = "$($server.Name).$($scriptFQDN)"
-                    Copy-SPSSideBySideFilesAllServers -Server $spTargetServer -InstallAccount $ADM
                 }
-                catch {
-                    # Handle errors during Run Copy-SPSSideBySideFilesAllServers
-                    Write-Error -Message @"
+            }
+
+            # Run Copy-SPSideBySideFiles on other servers
+            if ($jsonEnvCfg.SideBySideToken.Enable) {
+                $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' -and $_.Address -ne "$($env:COMPUTERNAME)" }
+                foreach ($server in $spServers) {
+                    try {
+                        $spTargetServer = "$($server.Name).$($scriptFQDN)"
+                        Copy-SPSSideBySideFilesAllServers -Server $spTargetServer -InstallAccount $credential
+                    }
+                    catch {
+                        # Handle errors during Run Copy-SPSSideBySideFilesAllServers
+                        Write-Error -Message @"
 Failed to Run Copy-SPSideBySideFiles CmdLet
 Target Server:  $($spTargetServer)
 Target SPFarm: $($spFarmName)
 Exception: $_
 "@
+                    }
                 }
-            }            
+            }
         }
     }
 }
 #endregion
 
 # Clean-Up
-Trap { Continue }
 $DateEnded = Get-Date
 Write-Output '-----------------------------------------------'
 Write-Output "| SPSUpdate Script Completed"
@@ -465,7 +492,7 @@ Write-Output "| Started on  - $DateStarted"
 Write-Output "| Ended on    - $DateEnded"
 Write-Output '-----------------------------------------------'
 Stop-Transcript
-Remove-Variable * -ErrorAction SilentlyContinue
-Remove-Module * -ErrorAction SilentlyContinue
+$loadedModules = @('util','CredentialManager')
+$loadedModules | ForEach-Object { Remove-Module -Name $_ -ErrorAction SilentlyContinue }
 $error.Clear()
 Exit
