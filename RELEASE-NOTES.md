@@ -1,36 +1,21 @@
 # SPSUpdate - Release Notes
 
-## [1.0.0] - 2024-11-20
+## [1.0.1] - 2025-09-01
 
 ### Changed
 
-- README.md
-  - Add Requirement and Changelog sections
-- release.yml
-  - Zip scripts folder and mane it with Tag version
-- PULL_REQUEST_TEMPLATE.md => Remove examples and unit test tasks
+- Update options version in Issue Templates files: 1_bug_report.yml
+- Change Write-Verbose CmdLet to Write-Output in scripts\Modules\sps.util.psm1
 
-### Added
+### Fixed
 
-- README.md
-  - Add code_of_conduct.md badge
-- Add CODE_OF_CONDUCT.md file
-- Add Issue Templates files:
-  - 1_bug_report.yml
-  - 2_feature_request.yml
-  - 3_documentation_request.yml
-  - 4_improvement_request.yml
-  - config.yml
-- Add RELEASE-NOTES.md file
-- Add CHANGELOG.md file
-- Add CONTRIBUTING.md file
-- Add release.yml file
-- Add scripts folder with first version of SPSUpdate
-- Wiki Documentation in repository - Add :
-  - wiki/Configuration.md
-  - wiki/Getting-Started.md
-  - wiki/Home.md
-  - wiki/Usage.md
-  - .github/workflows/wiki.yml
+scripts\SPSUpdate.ps1 and scripts\Modules\util.psm1
+
+- Resolve Cannot add Scheduled Task SPSUpdate-FullScript in SharePoint Task Path ([issue #2](https://github.com/luigilink/SPSUpdate/issues/2)).
+- Resolve Start-SPSConfigExeRemote not working on remote servers ([issue #6](https://github.com/luigilink/SPSUpdate/issues/6)).
+
+scripts\SPSUpdate.ps1
+
+- Resolve Set-SPSSideBySideToken function runs when BuildVersion is empty ([issue #4](https://github.com/luigilink/SPSUpdate/issues/4)).
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)
