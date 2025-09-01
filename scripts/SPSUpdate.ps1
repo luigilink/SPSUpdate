@@ -418,7 +418,7 @@ Exception: $_
         }
 
         # Enable SideBySideToken and run Copy-SPSideBySideFiles on master server
-        if ($null -ne $jsonEnvCfg.SideBySideToken.BuildVersion) {
+        if (-not([string]::IsNullOrEmpty($jsonEnvCfg.SideBySideToken.BuildVersion))) {
             try {
                 Write-Output "Configuring SharePoint SideBySideToken on farm $($spFarmName)"
                 Set-SPSSideBySideToken -BuildVersion "$($jsonEnvCfg.SideBySideToken.BuildVersion)" -EnableSideBySide $jsonEnvCfg.SideBySideToken.Enable
