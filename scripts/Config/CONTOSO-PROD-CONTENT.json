@@ -7,9 +7,10 @@
   "Domain": "contoso.com",
   "StoredCredential": "PROD-ADM",
   "Binaries": {
-    "SetupFullPath": "\\\\srvfileshared.contoso.com\\cumulativeupdates",
+    "ProductUpdate": true, 
+    "SetupFullPath": "D:\\SoftwarePackages\\SPS\\cumulativeupdates",
     "SetupFileName": ["uber-subscription-kb5002651-fullfile-x64-glb.exe"],
-    "ShutdownServices": true
+    "ShutdownServices": false
   },
   "UpgradeContentDatabase": true,
   "SideBySideToken": {

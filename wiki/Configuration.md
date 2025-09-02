@@ -12,9 +12,10 @@ To customize the script for your environment, you need to prepare a JSON configu
   "Domain": "contoso.com",
   "StoredCredential": "PROD-ADM",
   "Binaries": {
-    "SetupFullPath": "\\\\srvfileshared.contoso.com\\cumulativeupdates",
+    "ProductUpdate": true,
+    "SetupFullPath": "D:\\SoftwarePackages\\SPS\\cumulativeupdates",
     "SetupFileName": ["uber-subscription-kb5002651-fullfile-x64-glb.exe"],
-    "ShutdownServices": true
+    "ShutdownServices": false
   },
   "UpgradeContentDatabase": true,
   "SideBySideToken": {
@@ -36,7 +37,7 @@ To customize the script for your environment, you need to prepare a JSON configu
 
 ## Binaries settings
 
-Use `SetupFullPath`, `SetupFileName` and `ShutdownServices` parameters to configure your binaries settings in your environment
+Use `ProductUpdate`, `SetupFullPath`, `SetupFileName` and `ShutdownServices` parameters to configure your binaries settings in your environment
 
 ## UpgradeContentDatabase
 

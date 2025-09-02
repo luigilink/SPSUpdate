@@ -140,11 +140,9 @@ function Start-SPSConfigExeRemote {
     $getSPInstalledProductVersion = (Get-Command $fullPath).FileVersionInfo
 
     if ($getSPInstalledProductVersion.FileMajorPart -eq 15) {
-        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\15.0\WSS'
         $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\15\BIN"
     }
     else {
-        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\16.0\WSS'
         $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
     }
     $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
@@ -394,4 +392,57 @@ function Initialize-SPSContentDbJsonFile {
         #Convert jsonObject to JSON and save to a file
         $jsonObject | ConvertTo-Json | Set-Content -Path $Path -Force
     }
+}
+
+function Start-SPSProductUpdate {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $Server,
+
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.PSCredential]
+        $InstallAccount,
+
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $SetupFile,
+
+        [Parameter(Mandatory = $true)]
+        [System.Boolean]
+        $ShutdownServices
+    )
+
+    if (-Not (Test-Path -Path $SetupFile)) {
+        Throw "Setup file '$SetupFile' not found."
+    }
+
+    Configuration InstallSPProductUpdate
+    {
+        Import-DscResource -Module SharePointDsc
+        Node $Server
+        {
+            SPProductUpdate 'APPLICATION_SpsCumulativeUpdateInstallation' {
+                SetupFile            = $SetupFile
+                ShutdownServices     = $ShutdownServices
+                Ensure               = 'Present'
+                PsDscRunAsCredential = $InstallAccount
+            }
+        }
+    }
+
+    $configData = @{
+        AllNodes = @(
+            @{
+                NodeName                    = $Server
+                PSDscAllowPlainTextPassword = $true
+                PSDscAllowDomainUser        = $true
+            }
+        )
+    }
+
+    $config = InstallSPProductUpdate -ConfigurationData $configData
+    Start-DscConfiguration -Path $config.psparentpath -Wait -Verbose -Force
 }

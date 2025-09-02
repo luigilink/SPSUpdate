@@ -3,7 +3,17 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2025-09-02
+
+### Added
+
+scripts\Modules\sps.util.psm1:
+
+- Add new function Start-SPSProductUpdate
+
+scripts\Modules\util.psm1
+
+- Add new function Get-SPSRebootStatus
 
 ### Changed
 
@@ -11,17 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use Exit instead of Break
 - Use [System.Diagnostics.FileVersionInfo]::GetVersionInfo instead of Get-Command
 - BREAKING CHANGE Remove Clear-SPSLog function
-- Remove ADM and use Credentail variable
+- Remove ADM and use Credential variable
 
 scripts\SPSUpdate.ps1:
 
-- BREAKING CHANGE - Add new parameter Action
+- BREAKING CHANGE - Add new parameters: Action and Server
 
 Wiki Documentation in repository - Update with new parameters:
 
 - wiki\Getting-Started.md
 - wiki\Home.md
 - wiki\Usage.md
+
+README.md
+
+- Add SharePointDsc as prerequisites
 
 ## [1.0.1] - 2025-09-01
 

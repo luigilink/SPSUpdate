@@ -49,8 +49,7 @@ function Invoke-SPSCommand {
     $VerbosePreference = 'Continue'
     # Base script to ensure the SharePoint snap-in is loaded
     $installedVersion = Get-SPSInstalledProductVersion
-    if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999)
-    {
+    if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999) {
         $baseScript = @"
             if (`$null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue))
             {
@@ -58,8 +57,7 @@ function Invoke-SPSCommand {
             }
 "@
     }
-    else
-    {
+    else {
         $baseScript = ''
     }
     # Prepare the arguments for Invoke-Command
@@ -267,4 +265,95 @@ function Start-SPSScheduledTask {
     else {
         Write-Output "Scheduled Task $Name does not exist in SharePoint Task Path"
     }
+}
+
+function Get-SPSRebootStatus {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $Server,
+
+        [Parameter()]
+        [System.Management.Automation.PSCredential]
+        $InstallAccount
+    )
+
+    $result = Invoke-SPSCommand -Credential $InstallAccount `
+        -Arguments @($PSBoundParameters, $MyInvocation.MyCommand.Source) `
+        -Server $Server `
+        -ScriptBlock {
+
+        $pending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+        return $pending
+    }
+
+    return $result
+}
+
+function Unblock-SPSSetupFile {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $Server,
+
+        [Parameter()]
+        [System.Management.Automation.PSCredential]
+        $InstallAccount,
+
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $SetupFilePath
+    )
+
+    $result = Invoke-SPSCommand -Credential $InstallAccount `
+        -Arguments $SetupFilePath `
+        -Server $Server `
+        -ScriptBlock {
+
+        $SetupFilePath = $args[0]
+
+        Unblock-File -Path $SetupFilePath -Verbose
+    }
+
+    return $result
+}
+
+function Clear-SPSDscCache {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $Server,
+
+        [Parameter()]
+        [System.Management.Automation.PSCredential]
+        $InstallAccount
+    )
+
+    Write-Output 'Cleaning the DSC Configuration Cache'
+
+    $result = Invoke-SPSCommand -Credential $InstallAccount `
+        -Arguments @($PSBoundParameters, $MyInvocation.MyCommand.Source) `
+        -Server $Server `
+        -ScriptBlock {
+
+        Remove-DscConfigurationDocument -Stage Current, Pending, Previous -Force -Verbose
+        Start-Sleep -s 5
+
+        $dscConfigCacheFullPath = Join-Path -Path (Join-Path -Path $env:windir -ChildPath 'System32') `
+            -ChildPath 'Configuration' `
+            -Resolve
+        $dscConfigCacheChildItem = Get-ChildItem -Path $dscConfigCacheFullPath | Where-Object -FilterScript {
+            $_.PSisContainer -eq $false
+        }
+
+        $dscConfigCacheChildItem | Remove-Item -Force -Verbose
+    }
+
+    return $result
 }

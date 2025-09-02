@@ -4,6 +4,7 @@
 
 - PowerShell 5.0 or later
 - CredSSP configured
+- SharePointDsc Installed (if using `ProductUpdate`)
 - Administrative privileges on the SharePoint Server
 - StoredCredential configured (if using `Install`)
 

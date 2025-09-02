@@ -1,21 +1,37 @@
 # SPSUpdate - Release Notes
 
-## [1.0.1] - 2025-09-01
+## [2.0.0] - 2025-09-02
+
+### Added
+
+scripts\Modules\sps.util.psm1:
+
+- Add new function Start-SPSProductUpdate
+
+scripts\Modules\util.psm1
+
+- Add new function Get-SPSRebootStatus
 
 ### Changed
 
-- Update options version in Issue Templates files: 1_bug_report.yml
-- Change Write-Verbose CmdLet to Write-Output in scripts\Modules\sps.util.psm1
+- Use $PSScriptRoot instead of $MyInvocation.MyCommand.Definition
+- Use Exit instead of Break
+- Use [System.Diagnostics.FileVersionInfo]::GetVersionInfo instead of Get-Command
+- BREAKING CHANGE Remove Clear-SPSLog function
+- Remove ADM and use Credential variable
 
-### Fixed
+scripts\SPSUpdate.ps1:
 
-scripts\SPSUpdate.ps1 and scripts\Modules\util.psm1
+- BREAKING CHANGE - Add new parameters: Action and Server
 
-- Resolve Cannot add Scheduled Task SPSUpdate-FullScript in SharePoint Task Path ([issue #2](https://github.com/luigilink/SPSUpdate/issues/2)).
-- Resolve Start-SPSConfigExeRemote not working on remote servers ([issue #6](https://github.com/luigilink/SPSUpdate/issues/6)).
+Wiki Documentation in repository - Update with new parameters:
 
-scripts\SPSUpdate.ps1
+- wiki\Getting-Started.md
+- wiki\Home.md
+- wiki\Usage.md
 
-- Resolve Set-SPSSideBySideToken function runs when BuildVersion is empty ([issue #4](https://github.com/luigilink/SPSUpdate/issues/4)).
+README.md
+
+- Add SharePointDsc as prerequisites
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)

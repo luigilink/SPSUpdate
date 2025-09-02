@@ -7,12 +7,13 @@
   "Domain": "contoso.com",
   "StoredCredential": "PROD-ADM",
   "Binaries": {
-    "SetupFullPath": "\\\\srvfileshared.contoso.com\\cumulativeupdates",
+    "ProductUpdate": true, 
+    "SetupFullPath": "D:\\SoftwarePackages\\SPS\\cumulativeupdates",
     "SetupFileName": [
       "sts-subscription-kb5002191-fullfile-x64-glb.exe",
       "wssloc-subscription-kb5002110-fullfile-x64-glb.exe"
     ],
-    "ShutdownServices": true
+    "ShutdownServices": false
   },
   "UpgradeContentDatabase": false,
   "SideBySideToken": {
