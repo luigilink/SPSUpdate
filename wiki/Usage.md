@@ -15,10 +15,9 @@
 | Parameter         | Description                                                                                                                                                                                                            |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-ConfigFile`     | Specifies the path to the configuration file.                                                                                                                                                                          |
-| `-Sequence`       | Specifies the Sequence for parallel upgrade Content DB.                                                                                                                                                                |
+| `-Sequence`       | (Optional) Specifies the Sequence for parallel upgrade Content DB.                                                                                                                                                     |
 | `-Action`         | (Optional) Use the Action parameter equal to Install to add the script in taskscheduler, InstallAccount parameter need to be set. Use the Action parameter equal to Uninstall to remove the script from taskscheduler. |
 | `-InstallAccount` | (Optional) Need parameter InstallAccount whent you use the Action parameter equal to Install.                                                                                                                          |
-| `-Uninstall`      | Remove the SPSUpdate script and all related scheduled task from task scheduler                                                                                                                                         |
 | `-Server`         | (Optional) Need parameter Server whent you use the Action parameter equal to ProductUpdate.                                                                                                                            |
 
 ## Examples
