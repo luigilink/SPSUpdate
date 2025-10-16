@@ -9,16 +9,16 @@
 - PowerShell 5.1 or later.
 - Necessary permissions to access the SharePoint Farm.
 - Ensure the script is placed in a directory accessible by the user.
+- Copy the script and cumulative update files on each SharePoint Server.
 
 ## Parameters
 
 | Parameter         | Description                                                                                                                                                                                                            |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-ConfigFile`     | Specifies the path to the configuration file.                                                                                                                                                                          |
-| `-Sequence`       | (Optional) Specifies the Sequence for parallel upgrade Content DB.                                                                                                                                                     |
-| `-Action`         | (Optional) Use the Action parameter equal to Install to add the script in taskscheduler, InstallAccount parameter need to be set. Use the Action parameter equal to Uninstall to remove the script from taskscheduler. |
-| `-InstallAccount` | (Optional) Need parameter InstallAccount whent you use the Action parameter equal to Install.                                                                                                                          |
-| `-Server`         | (Optional) Need parameter Server whent you use the Action parameter equal to ProductUpdate.                                                                                                                            |
+| `ConfigFile`     | Specifies the path to the configuration file.                                                                                                                                                                          |
+| `Sequence`       | (Optional) Specifies the Sequence for parallel upgrade Content DB.                                                                                                                                                     |
+| `Action`         | (Optional) Use the Action parameter equal to Install to add the script in taskscheduler, InstallAccount parameter need to be set. Use the Action parameter equal to Uninstall to remove the script from taskscheduler. |
+| `InstallAccount` | (Optional) Need parameter InstallAccount whent you use the Action parameter equal to Install or ProductUpdate.                                                                                                                          |
 
 ## Examples
 
@@ -49,7 +49,7 @@
 ### Example 5: ProductUpdate Usage Example
 
 ```powershell
-.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Action ProductUpdate -Server 'WFE'
+.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Action ProductUpdate -InstallAccount (Get-Credential)
 ```
 
 ## Logging

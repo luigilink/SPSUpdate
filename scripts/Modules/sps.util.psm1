@@ -399,10 +399,6 @@ function Start-SPSProductUpdate {
     param
     (
         [Parameter(Mandatory = $true)]
-        [System.String]
-        $Server,
-
-        [Parameter(Mandatory = $true)]
         [System.Management.Automation.PSCredential]
         $InstallAccount,
 
@@ -422,7 +418,7 @@ function Start-SPSProductUpdate {
     Configuration InstallSPProductUpdate
     {
         Import-DscResource -Module SharePointDsc
-        Node $Server
+        Node Localhost
         {
             SPProductUpdate 'APPLICATION_SpsCumulativeUpdateInstallation' {
                 SetupFile            = $SetupFile
@@ -436,7 +432,7 @@ function Start-SPSProductUpdate {
     $configData = @{
         AllNodes = @(
             @{
-                NodeName                    = $Server
+                NodeName                    = Localhost
                 PSDscAllowPlainTextPassword = $true
                 PSDscAllowDomainUser        = $true
             }

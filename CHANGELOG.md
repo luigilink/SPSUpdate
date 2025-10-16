@@ -3,6 +3,29 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [UnReleased]
+
+### Changed
+
+scripts\SPSUpdate.ps1:
+
+- Remove Cleaning up DSC Configuration folder
+- Add Get credential from Credential Manager
+- BREAKING CHANGE Remove Server Parameter
+
+scripts\Modules\sps.util.psm1:
+
+- Update Start-SPSProductUpdate Function: Remove Server parameter
+
+scripts\Modules\util.psm1
+
+- Remove Unblock-SPSSetupFile and Clear-SPSDscCache functions
+
+Wiki Documentation in repository - Update with new parameters:
+
+- wiki\Getting-Started.md
+- wiki\Usage.md
+
 ## [2.0.0] - 2025-09-02
 
 ### Added

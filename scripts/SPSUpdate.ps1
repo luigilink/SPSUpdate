@@ -8,7 +8,7 @@
 
     .PARAMETER ConfigFile
     Need parameter ConfigFile, example:
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json'
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'E:\SCRIPT\CONFIG\contoso-PROD.json'
 
     .PARAMETER Action
     Use the Action parameter equal to Install if you want to add the SPSUpdate script in taskscheduler
@@ -18,31 +18,28 @@
     Use the Action parameter equal to Uninstall if you want to remove the SPSUpdate script from taskscheduler
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action Uninstall
 
-    Use the Action parameter equal to ProductUpdate if you want to run the ProductUpdate on a specific SharePoint Server
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -Server 'SPFARM01'
+    Use the Action parameter equal to ProductUpdate if you want to run the ProductUpdate locally
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
 
     .PARAMETER Sequence
     Need parameter Sequence for SPS Farm, example:
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Sequence 1
 
     .PARAMETER InstallAccount
-    Need parameter InstallAccount when you use the Action Install parameter
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
-
-    .PARAMETER Server
-    Need parameter Server when you use the Action ProductUpdate parameter
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -Server 'SPFARM01' -ConfigFile 'contoso-PROD.json'
+    Need parameter InstallAccount when you use the Action Install and ProductUpdate parameters
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
 
     .EXAMPLE
     SPSUpdate.ps1 -Action Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
     SPSUpdate.ps1 -Action Uninstall -ConfigFile 'contoso-PROD.json'
-    SPSUpdate.ps1 -Action ProductUpdate -Server 'SPFARM01' -ConfigFile 'contoso-PROD.json'
+    SPSUpdate.ps1 -Action ProductUpdate -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
 
     .NOTES
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
-    Date:		September 02, 2025
-    Version:	2.0.0
+    Date:		October 17, 2025
+    Version:	3.0.0
 
     .LINK
     https://spjc.fr/
@@ -67,11 +64,7 @@ param
 
     [Parameter(Position = 3)]
     [System.Management.Automation.PSCredential]
-    $InstallAccount, # Credential for the InstallAccount (when Action is Install)
-
-    [Parameter(Position = 4)]
-    [System.String]
-    $Server # Target server where the commands will be executed (when Action is ProductUpdate)
+    $InstallAccount # Credential for the InstallAccount (when Action is Install)
 )
 
 #region Initialization
@@ -135,7 +128,7 @@ catch {
 }
 
 # Define variables
-$SPSUpdateVersion = '2.0.0'
+$SPSUpdateVersion = '3.0.0'
 $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
@@ -152,8 +145,8 @@ if (-Not (Test-Path -Path $pathLogsFolder)) {
 if ($PSBoundParameters.ContainsKey('Sequence')) {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_Sequence$($Sequence)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
 }
-elseif ($PSBoundParameters.ContainsKey('Action') -and $Action -eq 'ProductUpdate' -and $PSBoundParameters.ContainsKey('Server')) {
-    $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_ProductUpdate-$($Server)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
+elseif ($PSBoundParameters.ContainsKey('Action') -and $Action -eq 'ProductUpdate') {
+    $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_ProductUpdate-$($env:COMPUTERNAME)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
 }
 else {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ($spsUpdateFileName + '.log')
@@ -254,25 +247,6 @@ Failed to Remove Scheduled Task SPSUpdate-Sequence$taskId in SharePoint Task Pat
 Exception: $_
 "@
         }
-        # Remove scheduled Task for ProductUpdate
-        try {
-            if ($jsonEnvCfg.ProductUpdate) {
-                $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' }
-                # Remove scheduled Taks for each SharePoint Server
-                foreach ($spServerPso in $spServers) {
-                    $spServer = $spServerPso.Address
-                    Write-Output "Removing Scheduled Task SPSUpdate-ProductUpdate-$($spServer) in SharePoint Task Path"
-                    Remove-SPSScheduledTask -Name "SPSUpdate-ProductUpdate-$($spServer)"
-                }
-            }
-        }
-        catch {
-            # Handle errors during Remove scheduled Task for ProductUpdate
-            Write-Error -Message @"
-Failed to Remove Scheduled Task SPSUpdate-ProductUpdate-$($spServer) in SharePoint Task Path
-Exception: $_
-"@
-        }
         # Remove Credential from Credential Manager
         try {
             $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
@@ -339,6 +313,11 @@ Exception: $_
                 }
                 # Add scheduled Task for Upgrade SPContentDatabase if UpgradeContentDatabase equal to true
                 if ($jsonEnvCfg.UpgradeContentDatabase) {
+                    # Get credential from Credential Manager
+                    $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
+                    if ($null -eq $credential) {
+                        $credential = $InstallAccount
+                    }
                     # Add scheduled Task for Upgrade SPContentDatabase in Parallel
                     foreach ($taskId in (1..4)) {
                         try {
@@ -363,100 +342,63 @@ Exception: $_
                         }
                     }
                 }
-                # Add scheduled Task for ProductUpdate if Action parameter equal to ProductUpdate
-                if ($jsonEnvCfg.Binaries.ProductUpdate) {
-                    try {
-                        $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' }
-                        # Add scheduled Taks for each SharePoint Server
-                        foreach ($spServerPso in $spServers) {
-                            $spServer = $spServerPso.Address
-                            # Initialize ActionArguments parameter
-                            $ActionArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Action ProductUpdate -Server `"$($spServer)`" -Verbose"
-                            Write-Output "Adding Scheduled Task SPSUpdate-ProductUpdate-$($spServer) in SharePoint Task Path"
-                            Add-SPSScheduledTask -Name "SPSUpdate-ProductUpdate-$($spServer)" `
-                                -Description "Scheduled Task for ProductUpdate SharePoint Server $($spServer)" `
-                                -ActionArguments $ActionArguments `
-                                -ExecuteAsCredential $InstallAccount
-                        }
-                    }
-                    catch {
-                        # Handle errors during Add scheduled Task for ProductUpdate
-                        Write-Error -Message @"
-Failed to Add Scheduled Task in SharePoint Task Path
-Task Name: SPSUpdate-ProductUpdate-$($spServer)
-Target SPFarm: $($spFarmName)
-Exception: $_
-"@
-                        Stop-Transcript
-                        exit
-                    }
-                }
             }
         }
     }
     'ProductUpdate' {
-        if (-not($PSBoundParameters.ContainsKey('Server'))) {
-            Write-Warning -Message ('SPSUpdate: ProductUpdate parameter is set. Please set also Server ' + `
+        # Check UserName and Password if ProductUpdate parameter is used
+        if (-not($PSBoundParameters.ContainsKey('InstallAccount'))) {
+            Write-Warning -Message ('SPSUpdate: ProductUpdate parameter is set. Please set also InstallAccount ' + `
                     "parameter. `nSee https://github.com/luigilink/SPSUpdate/wiki for details.")
             exit
         }
         else {
-            # Initialize Security
-            try {
-                $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)"
-            }
-            catch {
-                # Handle errors during Update Script Sequence
-                Write-Error -Message @"
-Failed to initialize Security from Crededential Manager
-The Target $($jsonEnvCfg.StoredCredential) not present in Credential Manager
-Please review your configuration file or contact your administrator.
-Exception: $_
-"@
-                Stop-Transcript
+            $UserName = $InstallAccount.UserName
+            $Password = $InstallAccount.GetNetworkCredential().Password
+            $currentDomain = 'LDAP://' + ([ADSI]'').distinguishedName
+            Write-Output "Checking Account `"$UserName`" ..."
+            $dom = New-Object System.DirectoryServices.DirectoryEntry($currentDomain, $UserName, $Password)
+            if ($null -eq $dom.Path) {
+                Write-Warning -Message "Password Invalid for user:`"$UserName`""
                 exit
             }
-            # Run ProductUpdate
-            try {
-                foreach ($setupFile in $jsonEnvCfg.Binaries.SetupFileName) {
-                    $fullSetupFilePath = Join-Path -Path $jsonEnvCfg.Binaries.SetupFullPath -ChildPath $setupFile
-                    $spTargetServer = ([System.Net.Dns]::GetHostByName($Server).HostName).ToString()
-                    Write-Output @"
+            else {
+                # Run ProductUpdate
+                try {
+                    foreach ($setupFile in $jsonEnvCfg.Binaries.SetupFileName) {
+                        $fullSetupFilePath = Join-Path -Path $jsonEnvCfg.Binaries.SetupFullPath -ChildPath $setupFile
+                        $spTargetServer = ([System.Net.Dns]::GetHostByName($env:COMPUTERNAME).HostName).ToString()
+                        Write-Output @"
 Running ProductUpdate with following parameters:
 SharePoint Server: $($spTargetServer)
 Setup File Path: $($fullSetupFilePath)
 Shutdown Services: $($jsonEnvCfg.Binaries.ShutdownServices)
 "@
-                    Write-Output "Getting Reboot Status on server: $spTargetServer"
-                    $getSPSRebootStatus = Get-SPSRebootStatus -Server $spTargetServer -InstallAccount $credential
-                    if ($getSPSRebootStatus) {
-                        Write-Warning "A reboot is required on server: $($spTargetServer). Please reboot the server and re-run the script."
-                        Stop-Transcript
-                        exit
+                        Write-Output "Getting Reboot Status on server: $spTargetServer"
+                        $getSPSRebootStatus = Get-SPSRebootStatus -Server $spTargetServer -InstallAccount $credential
+                        if ($getSPSRebootStatus) {
+                            Write-Warning "A reboot is required on server: $($spTargetServer). Please reboot the server and re-run the script."
+                            Stop-Transcript
+                            exit
+                        }
+                        # Unblock setup file if it is blocked
+                        Unblock-File -Path $fullSetupFilePath -Verbose
+                        Start-SPSProductUpdate -InstallAccount $credential -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices
                     }
-                    Unblock-SPSSetupFile -Server $spTargetServer -InstallAccount $credential -SetupFile $fullSetupFilePath
-                    Start-SPSProductUpdate -Server $spTargetServer -InstallAccount $credential -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices
-                    Clear-SPSDscCache -Server $spTargetServer -InstallAccount $credential
+                    Write-Output "Cleaning up DSC Configuration Documents on server: $($env:COMPUTERNAME)"
+                    Remove-DscConfigurationDocument -Stage Current, Pending, Previous -Force -Verbose
+                    Start-Sleep -s 5
                 }
-            }
-            catch {
-                # Handle errors during Run ProductUpdate
-                Write-Error -Message @"
-Failed to run Security from Crededential Manager
-The Target $($jsonEnvCfg.StoredCredential) not present in Credential Manager
-Please review your configuration file or contact your administrator.
+                catch {
+                    # Handle errors during Run ProductUpdate
+                    Write-Error -Message @"
+Failed to run ProductUpdate on server: $($env:COMPUTERNAME)
+Target Server:  $($spTargetServer)
 Exception: $_
 "@
-                Stop-Transcript
-                exit
-            }
-            finally {
-                Write-Output 'Cleaning up DSC Configuration folder...'
-                $dscConfigFullPath = Join-Path -Path $PSScriptRoot -ChildPath 'InstallSPProductUpdate' -Resolve
-                $dscConfigChildItem = Get-ChildItem -Path $dscConfigFullPath | Where-Object -FilterScript {
-                    $_.PSisContainer -eq $false
+                    Stop-Transcript
+                    exit
                 }
-                $dscConfigChildItem | Remove-Item -Force -Verbose
             }
         }
     }
@@ -482,7 +424,6 @@ Target SPFarm: $($spFarmName)
 Exception: $_
 "@
             }
-
         }
         else {
             # Initialize Security
@@ -585,7 +526,6 @@ Target SPFarm: $($spFarmName)
 Exception: $_
 "@
             }
-
 
             # Run SPConfigWizard on other SharePoint Server
             $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' -and $_.Address -ne "$($env:COMPUTERNAME)" }
