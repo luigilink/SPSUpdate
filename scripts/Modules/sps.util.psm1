@@ -1,123 +1,107 @@
 function Get-SPSServersPatchStatus {
     [CmdletBinding()]
-    param()
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $Server
+    )
 
-    $farm = Get-SPFarm
-    $productVersions = [Microsoft.SharePoint.Administration.SPProductVersions]::GetProductVersions($farm)
-    $servers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' }
-
-    [array]$srvStatus = @()
-    foreach ($server in $servers) {
-        $serverProductInfo = $productVersions.GetServerProductInfo($server.Id)
-        if ($null -ne $serverProductInfo) {
-            $statusType = $serverProductInfo.InstallStatus
-            if ($statusType -ne 0) {
-                $statusType = $serverProductInfo.GetUpgradeStatus($farm, $server)
-            }
-        }
-        else {
-            $statusType = [Microsoft.SharePoint.Administration.SPServerProductInfo+StatusType]::NoActionRequired
-        }
-
-        $srvStatus += [PSCustomObject]@{
-            Name   = $server.Name
-            Status = $statusType
+    $spFarm = Get-SPFarm
+    $productVersions = [Microsoft.SharePoint.Administration.SPProductVersions]::GetProductVersions($spFarm)
+    $spServer = Get-SPServer $Server
+    $serverProductInfo = $productVersions.GetServerProductInfo($spServer.Id)
+    if ($null -ne $serverProductInfo) {
+        $statusType = $serverProductInfo.InstallStatus
+        if ($statusType -ne 0) {
+            $statusType = $serverProductInfo.GetUpgradeStatus($spFarm, $spServer)
         }
     }
-    return $srvStatus
+    else {
+        $statusType = [Microsoft.SharePoint.Administration.SPServerProductInfo+StatusType]::NoActionRequired
+    }
+    return $statusType
 }
 
 function Start-SPSConfigExe {
     [CmdletBinding()]
     param ()
 
-    # Check if all servers are on the same patch level before running psconfig.exe
-    $unpatchedServers = Get-SPSServersPatchStatus | Where-Object { $_.Status -ne "UpgradeRequired" -and $_.Status -ne "UpgradeAvailable" }
-    if ($unpatchedServers.Count -eq 0) {
-        Write-Output "All servers are on the same patch level. Running PSConfig ..."
-        # Check which version of SharePoint is installed
-        $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
-        $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
-        $getSPInstalledProductVersion = (Get-Command $fullPath).FileVersionInfo
+    # Check which version of SharePoint is installed
+    $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
+    $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
+    $getSPInstalledProductVersion = (Get-Command $fullPath).FileVersionInfo
 
-        if ($getSPInstalledProductVersion.FileMajorPart -eq 15) {
-            $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\15.0\WSS'
-            $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\15\BIN"
-        }
-        else {
-            $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\16.0\WSS'
-            $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
-        }
-        $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
-
-        # Read LanguagePackInstalled and SetupType registry keys
-        $languagePackInstalled = Get-ItemProperty -LiteralPath $wssRegKey -Name 'LanguagePackInstalled'
-        $setupType = Get-ItemProperty -LiteralPath $wssRegKey -Name 'SetupType'
-
-        # Determine if LanguagePackInstalled=1 or SetupType=B2B_Upgrade.
-        # If so, the Config Wizard is required
-        if (($languagePackInstalled.LanguagePackInstalled -eq 1) -or ($setupType.SetupType -eq "B2B_UPGRADE")) {
-            Write-Output "Starting Configuration Wizard"
-            Write-Output "Starting 'Product Version Job' timer job"
-            $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
-            $lastRunTime = $pvTimerJob.LastRunTime
-
-            Start-SPTimerJob -Identity $pvTimerJob
-
-            $jobRunning = $true
-            $maxCount = 30
-            $count = 0
-            Write-Output "Waiting for 'Product Version Job' timer job to complete"
-            while ($jobRunning -and $count -le $maxCount) {
-                Start-Sleep -Seconds 10
-
-                $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
-                $jobRunning = $lastRunTime -eq $pvTimerJob.LastRunTime
-
-                $count++
-            }
-
-            # Fix for issue with psconfig on SharePoint 2019
-            if ($getSPInstalledProductVersion.FileMajorPart -eq 16) {
-                Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
-            }
-
-            $stdOutTempFile = "$env:TEMP\$((New-Guid).Guid)"
-            $psconfig = Start-Process -FilePath $psconfigExe `
-                -ArgumentList "-cmd upgrade -inplace b2b -wait -cmd applicationcontent -install -cmd installfeatures -cmd secureresources -cmd services -install" `
-                -RedirectStandardOutput $stdOutTempFile `
-                -Wait `
-                -PassThru
-
-            $cmdOutput = Get-Content -Path $stdOutTempFile -Raw
-            Remove-Item -Path $stdOutTempFile
-
-            if ($null -ne $cmdOutput) {
-                Write-Output $cmdOutput.Trim()
-            }
-
-            Write-Output "PSConfig Exit Code: $($psconfig.ExitCode)"
-            return $psconfig.ExitCode
-        }
-        # Error codes: https://aka.ms/installerrorcodes
-        switch ($result) {
-            0 {
-                Write-Output "SharePoint Post Setup Configuration Wizard ran successfully"
-            }
-            Default {
-                $message = ("SharePoint Post Setup Configuration Wizard failed, " + `
-                        "exit code was $result. Error codes can be found at " + `
-                        "https://aka.ms/installerrorcodes")
-                throw $message
-            }
-            $null {
-                Write-Output "No need to run SharePoint Post Setup Configuration Wizard"
-            }
-        }
+    if ($getSPInstalledProductVersion.FileMajorPart -eq 15) {
+        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\15.0\WSS'
+        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\15\BIN"
     }
     else {
-        Write-Output "There are still some unpatched servers. Skipping running PSConfig!"
-        Write-Output "The following servers aren't on the correct patch level: $($unpatchedServers -join ", ")"
+        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\16.0\WSS'
+        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
+    }
+    $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
+
+    # Read LanguagePackInstalled and SetupType registry keys
+    $languagePackInstalled = Get-ItemProperty -LiteralPath $wssRegKey -Name 'LanguagePackInstalled'
+    $setupType = Get-ItemProperty -LiteralPath $wssRegKey -Name 'SetupType'
+
+    # Determine if LanguagePackInstalled=1 or SetupType=B2B_Upgrade.
+    # If so, the Config Wizard is required
+    if (($languagePackInstalled.LanguagePackInstalled -eq 1) -or ($setupType.SetupType -eq "B2B_UPGRADE")) {
+        Write-Output "Starting Configuration Wizard"
+        Write-Output "Starting 'Product Version Job' timer job"
+        $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
+        $lastRunTime = $pvTimerJob.LastRunTime
+
+        Start-SPTimerJob -Identity $pvTimerJob
+
+        $jobRunning = $true
+        $maxCount = 30
+        $count = 0
+        Write-Output "Waiting for 'Product Version Job' timer job to complete"
+        while ($jobRunning -and $count -le $maxCount) {
+            Start-Sleep -Seconds 10
+
+            $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
+            $jobRunning = $lastRunTime -eq $pvTimerJob.LastRunTime
+
+            $count++
+        }
+
+        # Fix for issue with psconfig on SharePoint 2019
+        if ($getSPInstalledProductVersion.FileMajorPart -eq 16) {
+            Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
+        }
+
+        $stdOutTempFile = "$env:TEMP\$((New-Guid).Guid)"
+        $psconfig = Start-Process -FilePath $psconfigExe `
+            -ArgumentList "-cmd upgrade -inplace b2b -wait -cmd applicationcontent -install -cmd installfeatures -cmd secureresources -cmd services -install" `
+            -RedirectStandardOutput $stdOutTempFile `
+            -Wait `
+            -PassThru
+
+        $cmdOutput = Get-Content -Path $stdOutTempFile -Raw
+        Remove-Item -Path $stdOutTempFile
+
+        if ($null -ne $cmdOutput) {
+            Write-Output $cmdOutput.Trim()
+        }
+
+        Write-Output "PSConfig Exit Code: $($psconfig.ExitCode)"
+        return $psconfig.ExitCode
+    }
+    # Error codes: https://aka.ms/installerrorcodes
+    switch ($result) {
+        0 {
+            Write-Output "SharePoint Post Setup Configuration Wizard ran successfully"
+        }
+        Default {
+            $message = ("SharePoint Post Setup Configuration Wizard failed, " + `
+                    "exit code was $result. Error codes can be found at " + `
+                    "https://aka.ms/installerrorcodes")
+            throw $message
+        }
     }
 }
 
@@ -156,10 +140,17 @@ function Start-SPSConfigExeRemote {
 
         $psconfigExe = $args[0]
 
+        # Check which version of SharePoint is installed
+        $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
+        $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
+        $getSPInstalledProductVersion = (Get-Command $fullPath).FileVersionInfo
+
         Write-Verbose -Message "Starting 'Product Version Job' timer job"
         $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
         $lastRunTime = $pvTimerJob.LastRunTime
+
         Start-SPTimerJob -Identity $pvTimerJob
+
         $jobRunning = $true
         $maxCount = 30
         $count = 0
@@ -169,6 +160,11 @@ function Start-SPSConfigExeRemote {
             $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
             $jobRunning = $lastRunTime -eq $pvTimerJob.LastRunTime
             $count++
+        }
+
+        # Fix for issue with psconfig on SharePoint 2019
+        if ($getSPInstalledProductVersion.FileMajorPart -ne 15) {
+            Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
         }
 
         $stdOutTempFile = "$env:TEMP\$((New-Guid).Guid)"

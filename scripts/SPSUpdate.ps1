@@ -39,7 +39,7 @@
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
     Date:		October 17, 2025
-    Version:	3.0.1
+    Version:	3.0.2
 
     .LINK
     https://spjc.fr/
@@ -128,7 +128,7 @@ catch {
 }
 
 # Define variables
-$SPSUpdateVersion = '3.0.1'
+$SPSUpdateVersion = '3.0.2'
 $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
@@ -399,6 +399,11 @@ Exception: $_
                     Stop-Transcript
                     exit
                 }
+                finally {
+                    # Clean up DSC MOF File
+                    Write-Output "Cleaning up DSC MOF File on server: $($env:COMPUTERNAME)"
+                    Get-ChildItem -Path $PSScriptRoot -Filter '*.mof' -Recurse | Remove-Item -Force -Verbose
+                }
             }
         }
     }
@@ -512,10 +517,17 @@ Exception: $_
                 Write-Output "All Scheduled Tasks have finished"
             }
 
-            # Run SPConfigWizard on Master SharePoint Server
+            # Run Configuration Wizard on Master SharePoint Server
             try {
-                Write-Output "Getting status of Configuration Wizard on server: $($env:COMPUTERNAME)"
-                Start-SPSConfigExe
+                # Get patch status on Master SharePoint Server
+                Write-Output "Getting Patch Status on server: $($env:COMPUTERNAME)"
+                if ((Get-SPSServersPatchStatus -Server "$($env:COMPUTERNAME)") -eq 'NoActionRequired') {
+                    Write-Output "No Action Required on server: $($env:COMPUTERNAME). Skipping Configuration Wizard."
+                }
+                else {
+                    Write-Output "Action Required on server: $($env:COMPUTERNAME). Proceeding to run Configuration Wizard."
+                    Start-SPSConfigExe
+                }
             }
             catch {
                 # Handle errors during Run SPConfigWizard on Master SharePoint Server
@@ -531,9 +543,16 @@ Exception: $_
             $spServers = Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' -and $_.Address -ne "$($env:COMPUTERNAME)" }
             foreach ($spServer in $spServers) {
                 try {
-                    $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
-                    Write-Output "Getting status of Configuration Wizard on server: $($spServer.Name)"
-                    Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
+                    # Get patch status on Master SharePoint Server
+                    Write-Output "Getting Patch Status on server: $($spServer.Name)"
+                    if ((Get-SPSServersPatchStatus -Server "$($spServer.Name)") -eq 'NoActionRequired') {
+                        Write-Output "No Action Required on server: $($spServer.Name). Skipping Configuration Wizard."
+                    }
+                    else {
+                        Write-Output "Action Required on server: $($spServer.Name). Proceeding to run Configuration Wizard."
+                                            $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
+                        Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
+                    }
                 }
                 catch {
                     # Handle errors during Run SPConfigWizard on remote SharePoint Server
