@@ -35,7 +35,7 @@ In the above example, `$CredSSPDelegates` can be a wildcard name (such as "\*.co
 .\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action Install -InstallAccount (Get-Credential)
 ```
 
-4. Install Cumulative Update binaries on each server by running the following command:
+4. Install Cumulative Update binaries on each server by running the following command (or install manually):
 
 ```powershell
 .\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action ProductUpdate -InstallAccount (Get-Credential)
