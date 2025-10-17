@@ -3,6 +3,18 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2025-10-17
+
+### Changed
+
+scripts\SPSUpdate.ps1:
+
+- Change credential variable with InstallAccount variable in ProductUpdate Section
+
+scripts\Modules\sps.util.psm1:
+
+- Fix Exception: The term 'Localhost' is not recognized as the name of a cmdlet
+
 ## [3.0.0] - 2025-10-17
 
 ### Changed

@@ -39,7 +39,7 @@
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
     Date:		October 17, 2025
-    Version:	3.0.0
+    Version:	3.0.1
 
     .LINK
     https://spjc.fr/
@@ -128,7 +128,7 @@ catch {
 }
 
 # Define variables
-$SPSUpdateVersion = '3.0.0'
+$SPSUpdateVersion = '3.0.1'
 $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
@@ -375,7 +375,7 @@ Setup File Path: $($fullSetupFilePath)
 Shutdown Services: $($jsonEnvCfg.Binaries.ShutdownServices)
 "@
                         Write-Output "Getting Reboot Status on server: $spTargetServer"
-                        $getSPSRebootStatus = Get-SPSRebootStatus -Server $spTargetServer -InstallAccount $credential
+                        $getSPSRebootStatus = Get-SPSRebootStatus -Server $spTargetServer -InstallAccount $InstallAccount
                         if ($getSPSRebootStatus) {
                             Write-Warning "A reboot is required on server: $($spTargetServer). Please reboot the server and re-run the script."
                             Stop-Transcript
@@ -383,7 +383,7 @@ Shutdown Services: $($jsonEnvCfg.Binaries.ShutdownServices)
                         }
                         # Unblock setup file if it is blocked
                         Unblock-File -Path $fullSetupFilePath -Verbose
-                        Start-SPSProductUpdate -InstallAccount $credential -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices
+                        Start-SPSProductUpdate -InstallAccount $InstallAccount -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices
                     }
                     Write-Output "Cleaning up DSC Configuration Documents on server: $($env:COMPUTERNAME)"
                     Remove-DscConfigurationDocument -Stage Current, Pending, Previous -Force -Verbose

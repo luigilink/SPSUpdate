@@ -432,7 +432,7 @@ function Start-SPSProductUpdate {
     $configData = @{
         AllNodes = @(
             @{
-                NodeName                    = Localhost
+                NodeName                    = 'Localhost'
                 PSDscAllowPlainTextPassword = $true
                 PSDscAllowDomainUser        = $true
             }
