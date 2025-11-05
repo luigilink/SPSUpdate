@@ -43,7 +43,7 @@ function Start-SPSConfigExe {
     $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
 
     # Read LanguagePackInstalled and SetupType registry keys
-    $languagePackInstalled = Get-ItemProperty -LiteralPath $wssRegKey -Name 'LanguagePackInstalled'
+    $languagePackInstalled = Get-ItemProperty -LiteralPath $wssRegKey -Name 'LanguagePackInstalled' -ErrorAction SilentlyContinue
     $setupType = Get-ItemProperty -LiteralPath $wssRegKey -Name 'SetupType'
 
     # Determine if LanguagePackInstalled=1 or SetupType=B2B_Upgrade.

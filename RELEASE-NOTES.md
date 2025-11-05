@@ -1,16 +1,17 @@
 # SPSUpdate - Release Notes
 
-## [3.0.2] - 2025-10-17
+## [3.0.3] - 2025-11-05
 
 ### Changed
 
 scripts\SPSUpdate.ps1:
 
-- Cleanup DSC Mof files after installation of Cumulative Updates
-- Check patch status before running SPConfig.exe
+- Add ErrorAction SilentlyContinue in LanguagePackInstalled registry
 
-scripts\Modules\sps.util.psm1:
+### Added
 
-- Refactor Get-SPSServersPatchStatus and Start-SPSConfigExe functions
+scripts/SPSUpdate_README.md:
+
+- Resolve Documentation Request: Add readme file for offline installation ([issue #8](https://github.com/luigilink/SPSUpdate/issues/8)).
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)
