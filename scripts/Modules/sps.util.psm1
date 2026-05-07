@@ -24,7 +24,7 @@ function Get-SPSServersPatchStatus {
 }
 
 function Start-SPSConfigExe {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param ()
 
     # Check which version of SharePoint is installed
@@ -106,7 +106,7 @@ function Start-SPSConfigExe {
 }
 
 function Start-SPSConfigExeRemote {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -197,7 +197,7 @@ function Start-SPSConfigExeRemote {
 }
 
 function Update-SPSContentDatabase {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -212,7 +212,9 @@ function Update-SPSContentDatabase {
             Write-Output "Upgrading SharePoint SPContentDatabase $($Name)"
             $updateStarted = Get-date
             Write-Output "Started at $updateStarted - Please Wait ..."
-            Upgrade-SPContentDatabase $Name -Confirm:$false -Verbose
+            if ($PSCmdlet.ShouldProcess($Name, 'Upgrade SharePoint content database')) {
+                Upgrade-SPContentDatabase $Name -Confirm:$false -Verbose
+            }
             $updateFinished = Get-date
             Write-Output "Update for SharePoint SPContentDatabase $($Name) is finished at $updateFinished"
         }
@@ -227,7 +229,7 @@ function Update-SPSContentDatabase {
 }
 
 function Set-SPSSideBySideToken {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param
     (
         [Parameter()]
@@ -249,25 +251,33 @@ function Set-SPSSideBySideToken {
                 }
                 else {
                     Write-Output "Enabling EnableSideBySide on $spWebAppName Web Application"
-                    $webApp.WebService.EnableSideBySide = $true
-                    $webApp.WebService.Update()
+                    if ($PSCmdlet.ShouldProcess($spWebAppName, 'Enable SharePoint side-by-side mode')) {
+                        $webApp.WebService.EnableSideBySide = $true
+                        $webApp.WebService.Update()
+                    }
                 }
                 if ($webApp.WebService.SideBySideToken -eq $BuildVersion) {
                     Write-Output "SideBySideToken $BuildVersion is already enabled on $spWebAppName Web Application"
                 }
                 else {
                     Write-Output "Enabling SideBySideToken $BuildVersion on $spWebAppName Web Application"
-                    $webApp.WebService.SideBySideToken = $BuildVersion
-                    $webApp.WebService.Update()
+                    if ($PSCmdlet.ShouldProcess($spWebAppName, "Set SharePoint SideBySideToken to $BuildVersion")) {
+                        $webApp.WebService.SideBySideToken = $BuildVersion
+                        $webApp.WebService.Update()
+                    }
                 }
                 Write-Output 'Running CmdLet Copy-SPSideBySideFiles'
-                Copy-SPSideBySideFiles -Verbose
+                if ($PSCmdlet.ShouldProcess($spWebAppName, 'Copy SharePoint side-by-side files')) {
+                    Copy-SPSideBySideFiles -Verbose
+                }
             }
             else {
                 if ($webApp.WebService.EnableSideBySide) {
                     Write-Output "Disabling EnableSideBySide on $spWebAppName Web Application"
-                    $webApp.WebService.EnableSideBySide = $false
-                    $webApp.WebService.Update()
+                    if ($PSCmdlet.ShouldProcess($spWebAppName, 'Disable SharePoint side-by-side mode')) {
+                        $webApp.WebService.EnableSideBySide = $false
+                        $webApp.WebService.Update()
+                    }
                 }
                 else {
                     Write-Output "EnableSideBySide is already disabled on $spWebAppName Web Application"
@@ -279,7 +289,7 @@ function Set-SPSSideBySideToken {
         throw 'Did not find SPWebApplication Object'
     }
 }
-function Copy-SPSSideBySideFilesAllServers {
+function Copy-SPSSideBySideFilesRemote {
     [CmdletBinding()]
     param
     (
@@ -303,6 +313,8 @@ function Copy-SPSSideBySideFilesAllServers {
     }
     return $result
 }
+
+Set-Alias -Name Copy-SPSSideBySideFilesAllServers -Value Copy-SPSSideBySideFilesRemote
 function Initialize-SPSContentDbJsonFile {
     [CmdletBinding()]
     param
@@ -390,8 +402,117 @@ function Initialize-SPSContentDbJsonFile {
     }
 }
 
+function Get-SPSLocalVersionInfo {
+    [OutputType([System.Version])]
+    param
+    (
+        # Parameter help description
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('2016', '2019', 'SE')]
+        [System.String]
+        $ProductVersion,
+
+        [Parameter()]
+        [Switch]
+        $IsWssPackage
+    )
+
+    if ($ProductVersion -eq 'SE') {
+        $spVersion = 'Subscription Edition'
+    }
+    else {
+        $spVersion = $ProductVersion
+    }
+
+    $productNameRegEx = "Microsoft SharePoint (Foundation|Server) $($spVersion) Core"
+    if ($IsWssPackage) {
+        $productNameRegEx = "Microsoft SharePoint (Foundation|Server) $($spVersion) \d{4} (Lang|Language) Pack"
+    }
+    Write-Verbose "Product Name RegEx: $($productNameRegEx)"
+    $installerRegistryPath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products"
+    $patchRegistryPath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Patches"
+    $installerEntries = Get-ChildItem -Path $installerRegistryPath -ErrorAction SilentlyContinue
+    $nullVersion = New-Object -TypeName System.Version
+    $versionInfoValue = New-Object -TypeName System.Version
+    $officeProductKeys = $installerEntries | Where-Object -FilterScript { $_.PsPath -like "*00000000F01FEC" }
+
+    if ($null -eq $installerEntries -or $null -eq $officeProductKeys ) {
+        return $nullVersion
+    }
+
+    # $null - one command returns an empty value
+    $null = $officeProductKeys | ForEach-Object -Process {
+        $officeProductKey = $_
+        $productInfo = Get-ItemProperty "Registry::$($officeProductKey)\InstallProperties" -ErrorAction SilentlyContinue
+        if ($null -eq $productInfo) {
+            return
+        }
+        $prodName = $productInfo.DisplayName
+        if ($prodName -match $productNameRegEx) {
+            Write-Verbose "Gathering Information for $($prodName)"
+            $versionInfo = $nullVersion
+            $patchInformationFolder = Get-ItemProperty "Registry::$($officeProductKey)\Patches"
+            $patchGuid = $patchInformationFolder.AllPatches
+            if ($null -ne $patchGuid) {
+                $detailedPatchInformation = Get-ItemProperty "$($patchRegistryPath)\$($patchGuid)" -ErrorAction SilentlyContinue
+                $localPackage = $detailedPatchInformation.LocalPackage
+                if ($null -ne $localPackage) {
+                    $patchFileInformation = New-Object -TypeName System.IO.FileInfo -ArgumentList $localPackage
+                    if ($patchFileInformation.Extension -eq ".msp") {
+                        try {
+                            $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+                            $installerDatabase = $windowsInstaller.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $windowsInstaller, ($localPackage , 32))
+                            $databaseQuery = "SELECT Value FROM MsiPatchMetadata WHERE Property = 'BuildNumber'"
+                            $databaseView = $installerDatabase.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $installerDatabase, ($databaseQuery))
+                            $databaseView.GetType().InvokeMember("Execute", "InvokeMethod", $null, $databaseView, $null)
+                            $value = $databaseView.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $databaseView, $null)
+                            $versionInfo = [System.Version]$value.GetType().InvokeMember("StringData", "GetProperty", $null, $value, 1)
+                            Clear-ComObject -ComObject $databaseView
+                            Clear-ComObject -ComObject $value
+                            Clear-ComObject -ComObject $installerDatabase
+                            Clear-ComObject -ComObject $windowsInstaller
+                        }
+                        catch [Exception] {
+                            $catchMessage = @"
+An error occurred during the collection of data about installed products in Get-SPSLocalVersionInfo.
+Exception: $($_.Exception.Message)
+"@
+                            Write-Error -Message $catchMessage
+                            Add-SPSUpdateEvent -Message $catchMessage -Source 'Get-SPSLocalVersionInfo' -EntryType 'Error'
+                            $versionInfo = New-Object -TypeName System.Version -ArgumentList $productInfo.DisplayVersion
+                        }
+                    }
+                    else {
+                        $versionInfo = New-Object -TypeName System.Version -ArgumentList $productInfo.DisplayVersion
+                    }
+                }
+                else {
+                    $versionInfo = New-Object -TypeName System.Version -ArgumentList $productInfo.DisplayVersion
+                }
+            }
+            else {
+                $versionInfo = New-Object -TypeName System.Version -ArgumentList $productInfo.DisplayVersion
+            }
+            # Collect Information about language packs
+            if ($IsWssPackage -and (  $versionInfoValue -eq $nullVersion -or $versionInfoValue -gt $versionInfo)) {
+                $versionInfoValue = $versionInfo
+            }
+            else {
+                $versionInfoValue = $versionInfo
+            }
+            Write-Verbose "Version Information for $($prodName): $($versionInfoValue)"
+        }
+    }
+
+    if ($nullVersion -ne $versionInfoValue) {
+        return $versionInfoValue
+    }
+
+    return $nullVersion
+}
+
 function Start-SPSProductUpdate {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -407,34 +528,156 @@ function Start-SPSProductUpdate {
         $ShutdownServices
     )
 
+    Write-Verbose -Message "Getting install status of SP binaries"
+    Write-Verbose -Message "Check if the setup file exists"
     if (-Not (Test-Path -Path $SetupFile)) {
-        Throw "Setup file '$SetupFile' not found."
+        Throw "ERROR: Setup files could not be found: $SetupFile"
     }
 
-    Configuration InstallSPProductUpdate
-    {
-        Import-DscResource -Module SharePointDsc
-        Node Localhost
-        {
-            SPProductUpdate 'APPLICATION_SpsCumulativeUpdateInstallation' {
-                SetupFile            = $SetupFile
-                ShutdownServices     = $ShutdownServices
-                Ensure               = 'Present'
-                PsDscRunAsCredential = $InstallAccount
-            }
+    Write-Verbose -Message "Checking file status of $SetupFile"
+    Write-Verbose -Message "Checking status now"
+    try {
+        $zone = Get-Item -Path $SetupFile -Stream "Zone.Identifier" -EA SilentlyContinue
+    }
+    catch {
+        Write-Verbose -Message 'Encountered error while reading file stream. Ignoring file stream.'
+    }
+
+    if ($null -ne $zone) {
+        $catchMessage = @"
+Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the file before continuing.
+"@
+        Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+        throw $catchMessage
+    }
+    Write-Verbose -Message "File not blocked, continuing."
+    Write-Verbose -Message "Get file information from setup file"
+    $setupFileInfo = Get-ItemProperty -Path $SetupFile
+    $fileVersion = $setupFileInfo.VersionInfo.FileVersion
+    Write-Verbose -Message "Update has version $fileVersion"
+    $fileVersionInfo = New-Object -TypeName System.Version -ArgumentList $fileVersion
+    if ($fileVersionInfo.Build.ToString().Length -eq 4) {
+        $sharePointVersion = '2016'
+    }
+    else {
+        if ($fileVersionInfo.Build -lt 13000) {
+            $sharePointVersion = '2019'
+        }
+        else {
+            $sharePointVersion = 'SE'
         }
     }
-
-    $configData = @{
-        AllNodes = @(
-            @{
-                NodeName                    = 'Localhost'
-                PSDscAllowPlainTextPassword = $true
-                PSDscAllowDomainUser        = $true
-            }
-        )
+    
+    Write-Verbose -Message "Update is a Cumulative Update."
+    # For SP 2016 + 2019 Patches
+    $setupFileInformation = New-Object -TypeName System.IO.FileInfo -ArgumentList  $SetupFile
+    if ($setupFileInformation.Name.StartsWith("wssloc")) {
+        Write-Verbose -Message "Cumulative Update is multilingual"
+        $versionInfo = Get-SPSLocalVersionInfo -ProductVersion $sharePointVersion -IsWssPackage
+    }
+    else {
+        Write-Verbose -Message "Cumulative Update is generic"
+        $versionInfo = Get-SPSLocalVersionInfo -ProductVersion $sharePointVersion
     }
 
-    $config = InstallSPProductUpdate -ConfigurationData $configData
-    Start-DscConfiguration -Path $config.psparentpath -Wait -Verbose -Force
+    Write-Verbose -Message "The lowest version of any SharePoint component is $($versionInfo)"
+    if ($versionInfo -lt $fileVersionInfo) {
+        # Version of SharePoint is lower than the patch version. Patch is not installed.
+        Write-Verbose -Message "The version of SharePoint installed is lower than the update. Starting update process."
+        $installedVersion = Get-SPSInstalledProductVersion
+        if ($ShutdownServices) {
+            $listOfServices = @("SPSearchHostController", "SPTimerV4", "IISADMIN")
+            if ($installedVersion.ProductMajorPart -eq 15) {
+                
+                $listOfServices += "OSearch15"
+            }
+            else {
+                $listOfServices += "OSearch16"
+            }
+            Write-Verbose -Message "Gettings services status before stopping services for installation."
+            $servicesStatusFilePath = Join-Path -Path $PSScriptRoot -ChildPath "ServicesStatus_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMddHHmmss').json"
+            Get-Service -Name $listOfServices -ErrorAction SilentlyContinue | Select-Object Name, StartType, Status | ConvertTo-Json | Set-Content -Path $servicesStatusFilePath -Force
+            Write-Verbose -Message "Services status saved to $servicesStatusFilePath"
+            Write-Verbose -Message "Stopping services to speed up installation process"
+            foreach ($service in $listOfServices) {
+                Write-Verbose -Message "Stopping service: $service - Setting startup type to disabled"
+                Set-Service -Name $service -StartupType Disabled -ErrorAction SilentlyContinue
+                Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+            }
+            write-Verbose -Message "All services stopped. Starting installation process."
+            $null = Start-Process -FilePath "iisreset.exe" `
+                -ArgumentList "-stop -noforce" `
+                -Wait `
+                -PassThru
+
+
+        }
+        $setupProcessParams = @{
+            FilePath     = $SetupFile
+            ArgumentList = '/quiet /passive'
+            Wait         = $true
+            PassThru     = $true
+        }
+
+        $currentIdentity = $null
+        try {
+            $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        }
+        catch {
+            Write-Verbose -Message 'Unable to resolve current Windows identity; skipping Start-Process credential override.'
+        }
+
+        if ($InstallAccount.UserName -and $currentIdentity -and $InstallAccount.UserName -ne $currentIdentity) {
+            Write-Verbose -Message "Starting setup using provided InstallAccount: $($InstallAccount.UserName)"
+            $setupProcessParams.Credential = $InstallAccount
+        }
+
+        $setupInstall = Start-Process @setupProcessParams
+        # Error codes: https://aka.ms/installerrorcodes
+        switch ($setupInstall.ExitCode) {
+            0 {
+                Write-Verbose -Message "SharePoint update binary installation complete."
+            }
+            17022 {
+                Write-Verbose -Message ("SharePoint update binary installation complete, however a reboot is required.")
+            }
+            17025 {
+                Write-Verbose -Message ("The SharePoint update was already installed on your system." + `
+                        "Please report an issue about this behavior at https://github.com/dsccommunity/SharePointDsc")
+            }
+            Default {
+                $catchMessage = @"
+SharePoint update install failed, exit code was $($setupInstall.ExitCode).
+Error codes can be found at https://aka.ms/installerrorcodes
+"@                
+                Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+                throw $catchMessage
+            }
+        }
+        if ($ShutdownServices) {
+            Write-Verbose -Message "Getting services status from json configuration."
+            $servicesStatusFromFile = Get-Content -Path $servicesStatusFilePath -Raw | ConvertFrom-Json
+            foreach ($service in $servicesStatusFromFile) {
+                Write-Verbose -Message "Service: $($service.Name) - Startup Type before installation: $($service.StartType) - Status before installation: $($service.Status)"
+                if ($service.Status -ne "Running") {
+                    Write-Verbose -Message "Service: $($service.Name) was not running before installation. Keeping it stopped."
+                    Set-Service -Name $service.Name -StartupType $service.StartType -ErrorAction SilentlyContinue
+                }
+                else {
+                    Write-Verbose -Message "Service: $($service.Name) was running before installation. Restoring its startup type."
+                    Set-Service -Name $service.Name -StartupType $service.StartType -ErrorAction SilentlyContinue
+                    Start-Service -Name $service.Name -ErrorAction SilentlyContinue
+                }
+            }
+            Start-Process -FilePath "iisreset.exe" `
+                -ArgumentList "-start" `
+                -Wait `
+                -PassThru
+            write-Verbose -Message "All services started. Installation process complete."
+        }
+    }
+    else {
+        # Version of SharePoint is equal or greater than the patch version. Patch is installed.
+        Write-Verbose -Message "The version of SharePoint installed is equal or higher than the update. No action needed."
+    }
 }

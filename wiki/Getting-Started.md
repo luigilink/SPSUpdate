@@ -4,9 +4,9 @@
 
 - PowerShell 5.0 or later
 - CredSSP configured
-- SharePointDsc Installed (if using `ProductUpdate`)
 - Administrative privileges on the SharePoint Server
 - StoredCredential configured (if using `Install`)
+- SharePoint update binaries copied to a local or accessible path (if using `ProductUpdate`)
 
 ## Configure CredSSP
 
@@ -14,16 +14,16 @@
 
 You can manually configure CredSSP through the use of some PowerShell cmdlet's (and potentially group policy to configure the allowed delegate computers). Some basic instructions can be found at [https://technet.microsoft.com/en-us/magazine/ff700227.aspx](https://technet.microsoft.com/en-us/magazine/ff700227.aspx).
 
-### Option 2: Configure CredSSP through a DSC resource
+### Option 2: Configure CredSSP with PowerShell commands
 
-It is possible to use a DSC resource to configure your CredSSP settings on a server, and include this in all of your SharePoint server configurations. This is done through the use of the [xCredSSP](https://github.com/PowerShell/xCredSSP) resource. The below example shows how this can be used.
+If you prefer automation instead of manual setup, you can configure CredSSP directly with PowerShell commands on the server and client. Example:
 
 ```powershell
-xCredSSP CredSSPServer { Ensure = "Present"; Role = "Server" }
-xCredSSP CredSSPClient { Ensure = "Present"; Role = "Client"; DelegateComputers = $CredSSPDelegates }
+Enable-WSManCredSSP -Role Server -Force
+Enable-WSManCredSSP -Role Client -DelegateComputer '*.contoso.com' -Force
 ```
 
-In the above example, `$CredSSPDelegates` can be a wildcard name (such as "\*.contoso.com" to allow all servers in the contoso.com domain), or a list of specific servers (such as "server1", "server 2" to allow only specific servers).
+In the above example, the delegate computer value can be a wildcard name such as `*.contoso.com`, or you can specify one or more explicit SharePoint servers.
 
 ## Installation
 
@@ -35,11 +35,13 @@ In the above example, `$CredSSPDelegates` can be a wildcard name (such as "\*.co
 .\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action Install -InstallAccount (Get-Credential)
 ```
 
-4. Install Cumulative Update binaries on each server by running the following command (or install manually):
+1. Install Cumulative Update binaries on each server by running the following command (or install manually):
 
 ```powershell
 .\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action ProductUpdate -InstallAccount (Get-Credential)
 ```
+
+`ProductUpdate` runs the SharePoint installer directly and does not require any DSC module.
 
 > [!IMPORTANT]
 > Configure the StoredCredential parameter in JSON before running the script in installation mode.

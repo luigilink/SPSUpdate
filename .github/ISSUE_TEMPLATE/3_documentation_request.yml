@@ -2,7 +2,7 @@ name: Documentation Request
 description: Suggest improvements or request missing documentation.
 title: "[Documentation]: "
 labels: ["documentation", "triage"]
-projects: ["SPSUpdate"]
+projects: ["luigilink/SPSUpdate"]
 assignees:
   - luigilink
 body:
