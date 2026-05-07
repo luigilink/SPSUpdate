@@ -423,8 +423,7 @@ Exception: $_
             }
         }
     }
-}
-'ProductUpdate' {
+    'ProductUpdate' {
     # Check UserName and Password if ProductUpdate parameter is used
     if (-not($PSBoundParameters.ContainsKey('InstallAccount'))) {
         Write-Warning -Message ('SPSUpdate: ProductUpdate parameter is set. Please set also InstallAccount ' + `
@@ -549,8 +548,8 @@ Exception: $_
                     Add-SPSScheduledTask -Name $taskName `
                         -Description "Scheduled Task Sequence$taskId for Update SharePoint Server after installation of cumulative update" `
                         -ActionArguments $ActionArguments `
-                        -ExecuteAsCredential $credential
-                    -TaskPath $script:TaskPath
+                        -ExecuteAsCredential $credential `
+                        -TaskPath $script:TaskPath
                 }
                 catch {
                     # Handle errors during Add scheduled Task for Update Full Script
