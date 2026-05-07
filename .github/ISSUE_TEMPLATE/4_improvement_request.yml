@@ -2,7 +2,7 @@ name: Refactor/Improvement Request
 description: Request improvements or code refactoring.
 title: "[Improvement]: "
 labels: ["enhancement", "refactor", "triage"]
-projects: ["SPSUpdate"]
+projects: ["luigilink/SPSUpdate"]
 assignees:
   - luigilink
 body:

@@ -14,7 +14,7 @@ Exception: $_
 #endregion
 
 function Get-SPSInstalledProductVersion {
-    [OutputType([System.Version])]
+    [OutputType([System.Diagnostics.FileVersionInfo])]
     param ()
 
     $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
@@ -23,7 +23,67 @@ function Get-SPSInstalledProductVersion {
         Write-Error -Message 'SharePoint path {C:\Program Files\Common Files\microsoft shared\Web Server Extensions} does not exist'
     }
     else {
-        return ([System.Diagnostics.FileVersionInfo]::GetVersionInfo($fullPath.FullName)).FileVersion
+        return [System.Diagnostics.FileVersionInfo]::GetVersionInfo($fullPath.FullName)
+    }
+}
+function Add-SPSUpdateEvent {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $Message,
+
+        [Parameter(Mandatory = $true)]
+        [System.String]
+        $Source,
+
+        [Parameter()]
+        [ValidateSet('Error', 'Information', 'FailureAudit', 'SuccessAudit', 'Warning')]
+        [System.String]
+        $EntryType = 'Information',
+
+        [Parameter()]
+        [System.UInt32]
+        $EventID = 1
+    )
+
+    $LogName = 'SPSUpdate'
+
+    if ([System.Diagnostics.EventLog]::SourceExists($Source)) {
+        $sourceLogName = [System.Diagnostics.EventLog]::LogNameFromSourceName($Source, ".")
+        if ($LogName -ne $sourceLogName) {
+            Write-Verbose -Message "[ERROR] Specified source {$Source} already exists on log {$sourceLogName}"
+            return
+        }
+    }
+    else {
+        if ([System.Diagnostics.EventLog]::Exists($LogName) -eq $false) {
+            #Create event log
+            $null = New-EventLog -LogName $LogName -Source $Source
+        }
+        else {
+            [System.Diagnostics.EventLog]::CreateEventSource($Source, $LogName)
+        }
+    }
+
+    try {
+        $headerMessage = @"
+SPSUpdate Script Version: $spsUpdateVersion
+User: $currentUser
+ComputerName: $($env:COMPUTERNAME)
+--------------------------------------------------------------
+"@
+        Write-EventLog -LogName $LogName -Source $Source -EventId $EventID -Message ($headerMessage + "`r`n" + $Message) -EntryType $EntryType
+    }
+    catch {
+        Write-Error -Message @"
+SPSUpdate Script Version: $spsUpdateVersion
+An error occurred while adding Event Log in Source: $Source
+User: $currentUser
+ComputerName: $($env:COMPUTERNAME)
+Exception: $_
+"@
     }
 }
 

@@ -13,21 +13,20 @@ SPSUpdate is a PowerShell script tool designed to install cumulative updates in 
 
 ## Requirements
 
-### Windows Management Framework 5.0
+### PowerShell 5.1 or later
 
-Required because this module now implements class-based resources.
-Class-based resources can only work on computers with Windows rManagement Framework 5.0 or above.
-The preferred version is PowerShell 5.1 or higher, which ships with Windows 10 or Windows Server 2016.
+SPSUpdate no longer depends on a DSC module.
+Use PowerShell 5.1 or later on each SharePoint server where you run the script.
+The script relies on standard PowerShell remoting, scheduled tasks, Credential Manager integration, and native SharePoint update binaries.
 This is discussed further on the [SPSUpdate Wiki Getting-Started](https://github.com/luigilink/SPSUpdate/wiki/Getting-Started)
 
 ## CredSSP
 
-Impersonation is handled using the `Invoke-Command` cmdlet in PowerShell, together with the creation of a "remote" session via `New-PSSession`. In the SPSUpdate script, we authenticate as the InstallAccount and specify CredSSP as the authentication mechanism. This is explained further in the [SPSUpdate Wiki Getting-Started](https://github.com/luigilink/SPSUpdate/wiki/Getting-Started)
+Impersonation is handled using the `Invoke-Command` cmdlet in PowerShell, together with the creation of a remote session via `New-PSSession`. In the SPSUpdate script, we authenticate as the InstallAccount and specify CredSSP as the authentication mechanism. This is explained further in the [SPSUpdate Wiki Getting-Started](https://github.com/luigilink/SPSUpdate/wiki/Getting-Started)
 
-## SharePointDsc
+## ProductUpdate
 
-SPProductUpdate is the resource DSC of SharePointDsc Module. This resource is used to perform the update step of installing SharePoint updates, like Cumulative Updates and Service Packs.
-The installation of SharePointDsc is explained further in the [Installation section](https://github.com/dsccommunity/SharePointDsc?tab=readme-ov-file#installation)
+The `ProductUpdate` action runs the SharePoint update binaries directly. You only need the update files accessible on the target server and a valid `InstallAccount`.
 
 ## Documentation
 
