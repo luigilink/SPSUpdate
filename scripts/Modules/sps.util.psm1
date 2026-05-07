@@ -24,7 +24,7 @@ function Get-SPSServersPatchStatus {
 }
 
 function Start-SPSConfigExe {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param ()
 
     # Check which version of SharePoint is installed
@@ -106,7 +106,7 @@ function Start-SPSConfigExe {
 }
 
 function Start-SPSConfigExeRemote {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -197,7 +197,7 @@ function Start-SPSConfigExeRemote {
 }
 
 function Update-SPSContentDatabase {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -212,7 +212,9 @@ function Update-SPSContentDatabase {
             Write-Output "Upgrading SharePoint SPContentDatabase $($Name)"
             $updateStarted = Get-date
             Write-Output "Started at $updateStarted - Please Wait ..."
-            Upgrade-SPContentDatabase $Name -Confirm:$false -Verbose
+            if ($PSCmdlet.ShouldProcess($Name, 'Upgrade SharePoint content database')) {
+                Upgrade-SPContentDatabase $Name -Confirm:$false -Verbose
+            }
             $updateFinished = Get-date
             Write-Output "Update for SharePoint SPContentDatabase $($Name) is finished at $updateFinished"
         }
@@ -227,7 +229,7 @@ function Update-SPSContentDatabase {
 }
 
 function Set-SPSSideBySideToken {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param
     (
         [Parameter()]
@@ -249,25 +251,33 @@ function Set-SPSSideBySideToken {
                 }
                 else {
                     Write-Output "Enabling EnableSideBySide on $spWebAppName Web Application"
-                    $webApp.WebService.EnableSideBySide = $true
-                    $webApp.WebService.Update()
+                    if ($PSCmdlet.ShouldProcess($spWebAppName, 'Enable SharePoint side-by-side mode')) {
+                        $webApp.WebService.EnableSideBySide = $true
+                        $webApp.WebService.Update()
+                    }
                 }
                 if ($webApp.WebService.SideBySideToken -eq $BuildVersion) {
                     Write-Output "SideBySideToken $BuildVersion is already enabled on $spWebAppName Web Application"
                 }
                 else {
                     Write-Output "Enabling SideBySideToken $BuildVersion on $spWebAppName Web Application"
-                    $webApp.WebService.SideBySideToken = $BuildVersion
-                    $webApp.WebService.Update()
+                    if ($PSCmdlet.ShouldProcess($spWebAppName, "Set SharePoint SideBySideToken to $BuildVersion")) {
+                        $webApp.WebService.SideBySideToken = $BuildVersion
+                        $webApp.WebService.Update()
+                    }
                 }
                 Write-Output 'Running CmdLet Copy-SPSideBySideFiles'
-                Copy-SPSideBySideFiles -Verbose
+                if ($PSCmdlet.ShouldProcess($spWebAppName, 'Copy SharePoint side-by-side files')) {
+                    Copy-SPSideBySideFiles -Verbose
+                }
             }
             else {
                 if ($webApp.WebService.EnableSideBySide) {
                     Write-Output "Disabling EnableSideBySide on $spWebAppName Web Application"
-                    $webApp.WebService.EnableSideBySide = $false
-                    $webApp.WebService.Update()
+                    if ($PSCmdlet.ShouldProcess($spWebAppName, 'Disable SharePoint side-by-side mode')) {
+                        $webApp.WebService.EnableSideBySide = $false
+                        $webApp.WebService.Update()
+                    }
                 }
                 else {
                     Write-Output "EnableSideBySide is already disabled on $spWebAppName Web Application"
@@ -279,7 +289,7 @@ function Set-SPSSideBySideToken {
         throw 'Did not find SPWebApplication Object'
     }
 }
-function Copy-SPSSideBySideFilesAllServers {
+function Copy-SPSSideBySideFilesRemote {
     [CmdletBinding()]
     param
     (
@@ -303,6 +313,8 @@ function Copy-SPSSideBySideFilesAllServers {
     }
     return $result
 }
+
+Set-Alias -Name Copy-SPSSideBySideFilesAllServers -Value Copy-SPSSideBySideFilesRemote
 function Initialize-SPSContentDbJsonFile {
     [CmdletBinding()]
     param
@@ -500,7 +512,7 @@ Exception: $($_.Exception.Message)
 }
 
 function Start-SPSProductUpdate {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param
     (
         [Parameter(Mandatory = $true)]

@@ -16,7 +16,7 @@ Describe 'SPSUpdate.ps1 File Existence' {
         $tokens = $null
         
         $scriptPath = Join-Path -Path (Get-Location).Path -ChildPath 'scripts/SPSUpdate.ps1'
-        $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Path $scriptPath -Raw), [ref]$tokens, [ref]$parseErrors)
+        $null = [System.Management.Automation.Language.Parser]::ParseInput((Get-Content -Path $scriptPath -Raw), [ref]$tokens, [ref]$parseErrors)
         $parseErrors | Should -BeNullOrEmpty
     }
 }

@@ -261,6 +261,7 @@ Exception: $($_.Exception.Message)
 }
 
 function Remove-SPSScheduledTask {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param (
         [Parameter(Mandatory = $true)]
         [System.String]
@@ -295,8 +296,10 @@ function Remove-SPSScheduledTask {
         Write-Output '--------------------------------------------------------------'
         Write-Output "Removing $($Name) script in Task Scheduler Service ..."
         try {
-            $TaskFolder.DeleteTask($Name, $null) # Remove the task
-            Write-Output "Successfully removed $($Name) script from Task Scheduler Service"
+            if ($PSCmdlet.ShouldProcess($Name, 'Remove scheduled task')) {
+                $TaskFolder.DeleteTask($Name, $null) # Remove the task
+                Write-Output "Successfully removed $($Name) script from Task Scheduler Service"
+            }
         }
         catch {
             $catchMessage = @"
@@ -309,7 +312,7 @@ Exception: $($_.Exception.Message)
 }
 
 function Start-SPSScheduledTask {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -318,9 +321,11 @@ function Start-SPSScheduledTask {
     )
     $getScheduledTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
     if ($getScheduledTask) {
-        Start-ScheduledTask -TaskName $Name `
-            -TaskPath 'SharePoint' `
-            -ErrorAction SilentlyContinue
+        if ($PSCmdlet.ShouldProcess($Name, 'Start scheduled task')) {
+            Start-ScheduledTask -TaskName $Name `
+                -TaskPath 'SharePoint' `
+                -ErrorAction SilentlyContinue
+        }
     }
     else {
         Write-Output "Scheduled Task $Name does not exist in SharePoint Task Path"

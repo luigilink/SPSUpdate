@@ -23,13 +23,23 @@ Describe 'util.psm1 Module' {
 }
 
 Describe 'Get-SPSInstalledProductVersion' {
-    It 'function is callable' -Skip:(-not $IsWindows) {
-        { Get-SPSInstalledProductVersion -ErrorAction SilentlyContinue } | Should -Not -Throw
+    It 'returns FileVersionInfo when a SharePoint binary path is found' -Skip:(-not $IsWindows) {
+        Mock -ModuleName util -CommandName Get-Item -MockWith {
+            [pscustomobject]@{
+                FullName  = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+                Directory = '16\ISAPI'
+            }
+        }
+
+        $result = Get-SPSInstalledProductVersion
+
+        $result | Should -BeOfType ([System.Diagnostics.FileVersionInfo])
     }
 
-    It 'returns FileVersionInfo or null' -Skip:(-not $IsWindows) {
-        $result = Get-SPSInstalledProductVersion -ErrorAction SilentlyContinue
-        ($result -eq $null) -or ($result -is [System.Diagnostics.FileVersionInfo]) | Should -Be $true
+    It 'throws a descriptive error when no SharePoint binary path is found' -Skip:(-not $IsWindows) {
+        Mock -ModuleName util -CommandName Get-Item -MockWith { $null }
+
+        { Get-SPSInstalledProductVersion -ErrorAction Stop } | Should -Throw '*SharePoint path*does not exist*'
     }
 }
 

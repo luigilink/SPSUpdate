@@ -695,7 +695,7 @@ Exception: $_
             foreach ($spServer in $spServers) {
                 try {
                     $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
-                    Copy-SPSSideBySideFilesAllServers -Server $spTargetServer -InstallAccount $credential
+                    Copy-SPSSideBySideFilesRemote -Server $spTargetServer -InstallAccount $credential
                 }
                 catch {
                     # Handle errors during Run Copy-SPSSideBySideFilesAllServers
