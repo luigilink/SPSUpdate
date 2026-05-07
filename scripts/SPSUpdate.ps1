@@ -483,8 +483,7 @@ Exception: $_
             }
         }
     }
-}
-Default {
+    Default {
     if ($PSBoundParameters.ContainsKey('Sequence')) {
         try {
             Write-Output "Update Script in progress | Sequence $Sequence  - Please Wait ..."
