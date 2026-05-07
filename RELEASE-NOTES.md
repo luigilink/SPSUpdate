@@ -61,4 +61,10 @@ scripts/SPSUpdate.ps1:
 - Filter implemented: Get-ChildItem excludes files matching '*credentialmanager*' pattern before analysis
 - Improved CI/CD reliability by preventing false positives from third-party code analysis
 
+README.md and wiki/Getting-Started.md:
+
+- Removed outdated SharePointDsc and DSC-based prerequisite/setup guidance
+- Updated documentation to describe native `ProductUpdate` execution of SharePoint update binaries
+- Replaced the DSC CredSSP example with direct PowerShell CredSSP configuration commands
+
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)
