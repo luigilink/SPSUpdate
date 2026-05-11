@@ -125,7 +125,7 @@ Describe 'SPSUpdate.ps1 Default Action Task Management' {
     }
 
     It 'Default action treats Queued tasks as still active' {
-        $scriptContent | Should -Match "\$taskStatus\.State\s+-ne\s+'Running'\s+-and\s+\$taskStatus\.State\s+-ne\s+'Queued'"
+        $scriptContent | Should -Match '\$taskStatus\.State\s+-ne\s+''Running''\s+-and\s+\$taskStatus\.State\s+-ne\s+''Queued'''
     }
 
     It 'Default action passes -TaskPath to Add-SPSScheduledTask' {
