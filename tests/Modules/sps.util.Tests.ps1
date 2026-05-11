@@ -44,10 +44,12 @@ Describe 'Get-SPSLocalVersionInfo' {
 }
 
 Describe 'Start-SPSProductUpdate' {
-    BeforeEach {
-        $securePassword = ConvertTo-SecureString -String 'P@ssw0rd!' -AsPlainText -Force
-        $script:testCredential = New-Object System.Management.Automation.PSCredential ('CONTOSO\\spinstall', $securePassword)
+    It 'does not expose InstallAccount parameter anymore' {
+        $cmd = Get-Command -Name Start-SPSProductUpdate -Module sps.util
+        $cmd.Parameters.Keys | Should -Not -Contain 'InstallAccount'
+    }
 
+    BeforeEach {
         Mock -ModuleName sps.util -CommandName Test-Path -MockWith { $true }
         Mock -ModuleName sps.util -CommandName Get-ItemProperty -ParameterFilter { $Path -eq 'C:\\setup.exe' } -MockWith {
             [pscustomobject]@{ VersionInfo = [pscustomobject]@{ FileVersion = '16.0.20000.10000' } }
@@ -63,7 +65,7 @@ Describe 'Start-SPSProductUpdate' {
             [pscustomobject]@{ Stream = 'Zone.Identifier' }
         }
 
-        { Start-SPSProductUpdate -InstallAccount $script:testCredential -SetupFile 'C:\\setup.exe' -ShutdownServices $false } |
+        { Start-SPSProductUpdate -SetupFile 'C:\\setup.exe' -ShutdownServices $false } |
             Should -Throw '*Setup file is blocked*'
 
         Assert-MockCalled -ModuleName sps.util -CommandName Add-SPSUpdateEvent -Times 1 -Exactly
@@ -76,7 +78,7 @@ Describe 'Start-SPSProductUpdate' {
         }
 
         {
-            Start-SPSProductUpdate -InstallAccount $script:testCredential -SetupFile 'C:\\setup.exe' -ShutdownServices $false
+            Start-SPSProductUpdate -SetupFile 'C:\\setup.exe' -ShutdownServices $false
         } | Should -Throw '*exit code was 1234*'
     }
 
@@ -99,7 +101,7 @@ Describe 'Start-SPSProductUpdate' {
             [pscustomobject]@{ ExitCode = 0 }
         }
 
-        Start-SPSProductUpdate -InstallAccount $script:testCredential -SetupFile 'C:\\setup.exe' -ShutdownServices $true
+        Start-SPSProductUpdate -SetupFile 'C:\\setup.exe' -ShutdownServices $true
 
         Assert-MockCalled -ModuleName sps.util -CommandName Get-Service -Times 1 -ParameterFilter { $Name -contains 'OSearch15' }
         Assert-MockCalled -ModuleName sps.util -CommandName Set-Service -Times 1 -ParameterFilter {

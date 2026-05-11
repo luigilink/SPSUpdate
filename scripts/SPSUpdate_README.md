@@ -10,7 +10,6 @@ This document provides instructions for installing and configuring the **SPSUpda
 - Valid credentials for task scheduler setup
 - StoredCredential configured (if using Install)
 - CredSSP configured
-- SharePointDsc Installed (if using ProductUpdate)
 
 ## 📁 Files Required
 
@@ -99,16 +98,14 @@ Place `SPSUpdate.ps1`, any dependencies or modules and the configuration file in
 On each SharePoint Server, open PowerShell as Administrator and execute:
 
 ```powershell
-E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -InstallAccount (Get-Credential) -ConfigFile 'E\SCRIPTS\Config\contoso-PROD-CONTENT.json'
+E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -ConfigFile 'E\SCRIPTS\Config\contoso-PROD-CONTENT.json'
 ```
 
 This will:
 
-- Validate credentials
 - Getting Reboot Status on server
 - Unblock cumulative update files if it is blocked
-- Runnung Start-SPSProductUpdate function
-- Cleaning up DSC Configuration Documents on server
+- Running Start-SPSProductUpdate function
 
 ## 🔄 Uninstalling
 

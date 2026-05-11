@@ -26,7 +26,7 @@ Impersonation is handled using the `Invoke-Command` cmdlet in PowerShell, togeth
 
 ## ProductUpdate
 
-The `ProductUpdate` action runs the SharePoint update binaries directly. You only need the update files accessible on the target server and a valid `InstallAccount`.
+The `ProductUpdate` action runs the SharePoint update binaries directly on the local server. You only need the update files accessible on that server.
 
 ## Documentation
 

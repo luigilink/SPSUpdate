@@ -20,6 +20,10 @@ Describe 'util.psm1 Module' {
     It 'exports Invoke-SPSCommand' {
         Get-Command -Name Invoke-SPSCommand -Module util | Should -Not -BeNullOrEmpty
     }
+
+    It 'exports Test-SPSPendingReboot' {
+        Get-Command -Name Test-SPSPendingReboot -Module util | Should -Not -BeNullOrEmpty
+    }
 }
 
 Describe 'Get-SPSInstalledProductVersion' {
@@ -81,5 +85,33 @@ Describe 'Invoke-SPSCommand' {
     It 'has ScriptBlock parameter' {
         $cmd = Get-Command -Name Invoke-SPSCommand -Module util
         $cmd.Parameters.Keys | Should -Contain 'ScriptBlock'
+    }
+}
+
+Describe 'Test-SPSPendingReboot' {
+    It 'returns IsPending false when no reboot markers exist' {
+        Mock -ModuleName util -CommandName Test-Path -MockWith { $false }
+        Mock -ModuleName util -CommandName Get-ItemProperty -MockWith { $null }
+
+        $result = Test-SPSPendingReboot
+
+        $result.IsPending | Should -Be $false
+        $result.Reasons.Count | Should -Be 0
+    }
+
+    It 'returns IsPending true when reboot-required registry key exists' {
+        Mock -ModuleName util -CommandName Test-Path -MockWith {
+            param($Path)
+            if ($Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
+                return $true
+            }
+            return $false
+        }
+        Mock -ModuleName util -CommandName Get-ItemProperty -MockWith { $null }
+
+        $result = Test-SPSPendingReboot
+
+        $result.IsPending | Should -Be $true
+        $result.Reasons | Should -Contain 'WindowsUpdateRebootRequired'
     }
 }

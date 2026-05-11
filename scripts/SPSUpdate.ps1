@@ -19,27 +19,26 @@
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action Uninstall
 
     Use the Action parameter equal to ProductUpdate if you want to run the ProductUpdate locally
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -ConfigFile 'contoso-PROD.json'
 
     .PARAMETER Sequence
     Need parameter Sequence for SPS Farm, example:
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Sequence 1
 
     .PARAMETER InstallAccount
-    Need parameter InstallAccount when you use the Action Install and ProductUpdate parameters
+    Need parameter InstallAccount when you use the Action Install parameter
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
-    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
 
     .EXAMPLE
     SPSUpdate.ps1 -Action Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
     SPSUpdate.ps1 -Action Uninstall -ConfigFile 'contoso-PROD.json'
-    SPSUpdate.ps1 -Action ProductUpdate -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
+    SPSUpdate.ps1 -Action ProductUpdate -ConfigFile 'contoso-PROD.json'
 
     .NOTES
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
     Date:		May 07, 2026
-    Version:	3.1.0
+    Version:	3.1.1
 
     .LINK
     https://spjc.fr/
@@ -170,7 +169,7 @@ catch {
 }
 
 # Define variables
-$SPSUpdateVersion = '3.1.0'
+$SPSUpdateVersion = '3.1.1'
 $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
@@ -424,64 +423,46 @@ Exception: $_
         }
     }
     'ProductUpdate' {
-        # Check UserName and Password if ProductUpdate parameter is used
-        if (-not($PSBoundParameters.ContainsKey('InstallAccount'))) {
-            Write-Warning -Message ('SPSUpdate: ProductUpdate parameter is set. Please set also InstallAccount ' + `
-                    "parameter. `nSee https://github.com/luigilink/SPSUpdate/wiki for details.")
-            exit
-        }
-        else {
-            $UserName = $InstallAccount.UserName
-            $Password = $InstallAccount.GetNetworkCredential().Password
-            $currentDomain = 'LDAP://' + ([ADSI]'').distinguishedName
-            Write-Output "Checking Account `"$UserName`" ..."
-            $dom = New-Object System.DirectoryServices.DirectoryEntry($currentDomain, $UserName, $Password)
-            if ($null -eq $dom.Path) {
-                Write-Warning -Message "Password Invalid for user:`"$UserName`""
-                exit
-            }
-            else {
-                # Run ProductUpdate
-                try {
-                    foreach ($setupFile in $jsonEnvCfg.Binaries.SetupFileName) {
-                        $fullSetupFilePath = Join-Path -Path $jsonEnvCfg.Binaries.SetupFullPath -ChildPath $setupFile
-                        $spTargetServer = ([System.Net.Dns]::GetHostByName($env:COMPUTERNAME).HostName).ToString()
-                        Write-Output @"
+        # Run ProductUpdate
+        try {
+            foreach ($setupFile in $jsonEnvCfg.Binaries.SetupFileName) {
+                $fullSetupFilePath = Join-Path -Path $jsonEnvCfg.Binaries.SetupFullPath -ChildPath $setupFile
+                $spTargetServer = ([System.Net.Dns]::GetHostByName($env:COMPUTERNAME).HostName).ToString()
+                Write-Output @"
 Running ProductUpdate with following parameters:
 SharePoint Server: $($spTargetServer)
 Setup File Path: $($fullSetupFilePath)
 Shutdown Services: $($jsonEnvCfg.Binaries.ShutdownServices)
 "@
-                        Write-Output "Getting Reboot Status on server: $spTargetServer"
-                        $getSPSRebootStatus = Get-SPSRebootStatus -Server $spTargetServer -InstallAccount $InstallAccount
-                        if ($getSPSRebootStatus) {
-                            Write-Warning "A reboot is required on server: $($spTargetServer). Please reboot the server and re-run the script."
-                            Stop-Transcript
-                            exit
-                        }
-                        # Unblock setup file if it is blocked
-                        Unblock-File -Path $fullSetupFilePath -Verbose
-                        Start-SPSProductUpdate -InstallAccount $InstallAccount -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices
+                Write-Output "Getting Reboot Status on server: $spTargetServer"
+                $rebootStatus = Test-SPSPendingReboot
+                if ($rebootStatus.IsPending) {
+                    $rebootReasons = if ($null -ne $rebootStatus.Reasons -and $rebootStatus.Reasons.Count -gt 0) {
+                        $rebootStatus.Reasons -join ', '
                     }
+                    else {
+                        'UnknownReason'
+                    }
+                    Write-Warning "A reboot is required on server: $($spTargetServer). Detected pending reboot markers: $rebootReasons. Please reboot the server and re-run the script."
+                    Stop-Transcript
+                    exit
                 }
-                catch {
-                    # Handle errors during Run ProductUpdate
-                    $catchMessage = @"
+                # Unblock setup file if it is blocked
+                Unblock-File -Path $fullSetupFilePath -Verbose
+                Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices
+            }
+        }
+        catch {
+            # Handle errors during Run ProductUpdate
+            $catchMessage = @"
 Failed to run ProductUpdate on server: $($env:COMPUTERNAME)
 Target Server:  $($spTargetServer)
 Exception: $_
 "@
-                    Write-Error -Message $catchMessage
-                    Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
-                    Stop-Transcript
-                    exit
-                }
-                finally {
-                    # Clean up DSC MOF File
-                    Write-Output "Cleaning up DSC MOF File on server: $($env:COMPUTERNAME)"
-                    Get-ChildItem -Path $PSScriptRoot -Filter '*.mof' -Recurse | Remove-Item -Force -Verbose
-                }
-            }
+            Write-Error -Message $catchMessage
+            Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+            Stop-Transcript
+            exit
         }
     }
     Default {

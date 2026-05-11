@@ -173,7 +173,7 @@ Describe 'SPSUpdate.ps1 Content Validation' {
     }
 
     It 'defines the current script version' {
-        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.1\.0'''
+        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.1\.1'''
     }
 
     It 'imports util module' {
@@ -194,6 +194,14 @@ Describe 'SPSUpdate.ps1 Content Validation' {
 
     It 'checks for administrator privileges' {
         $scriptContent | Should -Match 'Administrator'
+    }
+
+    It 'uses consolidated reboot detection for ProductUpdate' {
+        $scriptContent | Should -Match 'Test-SPSPendingReboot'
+    }
+
+    It 'does not contain legacy ProductUpdate MOF cleanup code' {
+        $scriptContent | Should -Not -Match 'Cleaning up DSC MOF File|\.mof'
     }
 }
 

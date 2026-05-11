@@ -1,3 +1,26 @@
+function Clear-ComObject {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter()]
+        [System.Object]
+        $ComObject
+    )
+
+    if ($null -eq $ComObject) {
+        return
+    }
+
+    try {
+        if ([System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+            [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ComObject)
+        }
+    }
+    catch {
+        Write-Verbose -Message "Unable to release COM object: $($_.Exception.Message)"
+    }
+}
+
 function Get-SPSServersPatchStatus {
     [CmdletBinding()]
     param
@@ -516,10 +539,6 @@ function Start-SPSProductUpdate {
     param
     (
         [Parameter(Mandatory = $true)]
-        [System.Management.Automation.PSCredential]
-        $InstallAccount,
-
-        [Parameter(Mandatory = $true)]
         [System.String]
         $SetupFile,
 
@@ -612,27 +631,8 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
 
 
         }
-        $setupProcessParams = @{
-            FilePath     = $SetupFile
-            ArgumentList = '/quiet /passive'
-            Wait         = $true
-            PassThru     = $true
-        }
 
-        $currentIdentity = $null
-        try {
-            $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-        }
-        catch {
-            Write-Verbose -Message 'Unable to resolve current Windows identity; skipping Start-Process credential override.'
-        }
-
-        if ($InstallAccount.UserName -and $currentIdentity -and $InstallAccount.UserName -ne $currentIdentity) {
-            Write-Verbose -Message "Starting setup using provided InstallAccount: $($InstallAccount.UserName)"
-            $setupProcessParams.Credential = $InstallAccount
-        }
-
-        $setupInstall = Start-Process @setupProcessParams
+        $setupInstall = Start-Process -FilePath $SetupFile -ArgumentList '/quiet /passive' -Wait -PassThru
         # Error codes: https://aka.ms/installerrorcodes
         switch ($setupInstall.ExitCode) {
             0 {
