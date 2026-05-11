@@ -20,6 +20,10 @@ Describe 'util.psm1 Module' {
     It 'exports Invoke-SPSCommand' {
         Get-Command -Name Invoke-SPSCommand -Module util | Should -Not -BeNullOrEmpty
     }
+
+    It 'exports Test-SPSPendingReboot' {
+        Get-Command -Name Test-SPSPendingReboot -Module util | Should -Not -BeNullOrEmpty
+    }
 }
 
 Describe 'Get-SPSInstalledProductVersion' {
@@ -81,5 +85,105 @@ Describe 'Invoke-SPSCommand' {
     It 'has ScriptBlock parameter' {
         $cmd = Get-Command -Name Invoke-SPSCommand -Module util
         $cmd.Parameters.Keys | Should -Contain 'ScriptBlock'
+    }
+}
+
+Describe 'Start-SPSScheduledTask' {
+    It 'has TaskPath parameter' {
+        $cmd = Get-Command -Name Start-SPSScheduledTask -Module util
+        $cmd.Parameters.Keys | Should -Contain 'TaskPath'
+    }
+
+    It 'normalizes TaskPath and starts task when task exists' {
+        Mock -ModuleName util -CommandName Get-ScheduledTask -MockWith {
+            [pscustomobject]@{ TaskName = 'SPSUpdate-Sequence1'; State = 'Ready' }
+        }
+        Mock -ModuleName util -CommandName Start-ScheduledTask -MockWith { }
+
+        $result = Start-SPSScheduledTask -Name 'SPSUpdate-Sequence1' -TaskPath 'SharePoint' -Confirm:$false
+
+        $result.Name | Should -Be 'SPSUpdate-Sequence1'
+        $result.TaskPath | Should -Be '\SharePoint\'
+        $result.State | Should -Be 'Ready'
+
+        Assert-MockCalled -ModuleName util -CommandName Get-ScheduledTask -Times 2 -Exactly -ParameterFilter {
+            $TaskName -eq 'SPSUpdate-Sequence1' -and $TaskPath -eq '\SharePoint\'
+        }
+        Assert-MockCalled -ModuleName util -CommandName Start-ScheduledTask -Times 1 -Exactly -ParameterFilter {
+            $TaskName -eq 'SPSUpdate-Sequence1' -and $TaskPath -eq '\SharePoint\'
+        }
+    }
+
+    It 'throws a clear message when task does not exist in given TaskPath' {
+        Mock -ModuleName util -CommandName Get-ScheduledTask -MockWith { $null }
+        Mock -ModuleName util -CommandName Start-ScheduledTask -MockWith { }
+
+        { Start-SPSScheduledTask -Name 'MissingTask' -TaskPath 'SharePoint' -Confirm:$false } | Should -Throw 'Scheduled Task MissingTask does not exist in SharePoint Task Path'
+
+        Assert-MockCalled -ModuleName util -CommandName Start-ScheduledTask -Times 0
+    }
+}
+
+Describe 'Test-SPSPendingReboot' {
+    It 'returns IsPending false when no reboot markers exist' {
+        Mock -ModuleName util -CommandName Test-Path -MockWith { $false }
+        Mock -ModuleName util -CommandName Get-ItemProperty -MockWith { $null }
+
+        $result = Test-SPSPendingReboot
+
+        $result.IsPending | Should -Be $false
+        $result.Reasons.Count | Should -Be 0
+    }
+
+    It 'returns IsPending true when reboot-required registry key exists' {
+        Mock -ModuleName util -CommandName Test-Path -MockWith {
+            param($Path)
+            if ($Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
+                return $true
+            }
+            return $false
+        }
+        Mock -ModuleName util -CommandName Get-ItemProperty -MockWith { $null }
+
+        $result = Test-SPSPendingReboot
+
+        $result.IsPending | Should -Be $true
+        $result.Reasons | Should -Contain 'WindowsUpdateRebootRequired'
+    }
+
+    It 'does not flag WindowsUpdateServicesPending when Pending key has no child entries' {
+        Mock -ModuleName util -CommandName Test-Path -MockWith {
+            param($Path)
+            if ($Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Services\Pending') {
+                return $true
+            }
+            return $false
+        }
+        Mock -ModuleName util -CommandName Get-ChildItem -MockWith { @() }
+        Mock -ModuleName util -CommandName Get-ItemProperty -MockWith { $null }
+
+        $result = Test-SPSPendingReboot
+
+        $result.IsPending | Should -Be $false
+        $result.Reasons | Should -Not -Contain 'WindowsUpdateServicesPending'
+    }
+
+    It 'flags WindowsUpdateServicesPending when Pending key has child entries' {
+        Mock -ModuleName util -CommandName Test-Path -MockWith {
+            param($Path)
+            if ($Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Services\Pending') {
+                return $true
+            }
+            return $false
+        }
+        Mock -ModuleName util -CommandName Get-ChildItem -MockWith {
+            @([pscustomobject]@{ Name = 'Service1' })
+        }
+        Mock -ModuleName util -CommandName Get-ItemProperty -MockWith { $null }
+
+        $result = Test-SPSPendingReboot
+
+        $result.IsPending | Should -Be $true
+        $result.Reasons | Should -Contain 'WindowsUpdateServicesPending'
     }
 }

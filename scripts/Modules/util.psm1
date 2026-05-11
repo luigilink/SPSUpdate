@@ -164,6 +164,55 @@ function Invoke-SPSCommand {
     }
 }
 
+function Test-SPSPendingReboot {
+    [CmdletBinding()]
+    param ()
+
+    $rebootReasons = New-Object -TypeName System.Collections.Generic.List[string]
+
+    $registryChecks = @(
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'; Reason = 'WindowsUpdateRebootRequired' },
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'; Reason = 'ComponentBasedServicingRebootPending' },
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootInProgress'; Reason = 'ComponentBasedServicingRebootInProgress' },
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\ServerManager\CurrentRebootAttempts'; Reason = 'ServerManagerCurrentRebootAttempts' }
+    )
+
+    foreach ($check in $registryChecks) {
+        if (Test-Path -Path $check.Path -ErrorAction SilentlyContinue) {
+            $rebootReasons.Add($check.Reason)
+        }
+    }
+
+    # WindowsUpdate\Services\Pending can exist even after reboot; require at least one child entry.
+    $wuServicesPendingPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Services\Pending'
+    if (Test-Path -Path $wuServicesPendingPath -ErrorAction SilentlyContinue) {
+        $wuPendingEntries = Get-ChildItem -Path $wuServicesPendingPath -ErrorAction SilentlyContinue
+        if ($null -ne $wuPendingEntries -and $wuPendingEntries.Count -gt 0) {
+            $rebootReasons.Add('WindowsUpdateServicesPending')
+        }
+    }
+
+    $sessionManager = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -ErrorAction SilentlyContinue
+    if ($null -ne $sessionManager -and $null -ne $sessionManager.PendingFileRenameOperations -and $sessionManager.PendingFileRenameOperations.Count -gt 0) {
+        $rebootReasons.Add('PendingFileRenameOperations')
+    }
+
+    $activeComputerName = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' -Name ComputerName -ErrorAction SilentlyContinue
+    $pendingComputerName = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' -Name ComputerName -ErrorAction SilentlyContinue
+    if ($null -ne $activeComputerName -and $null -ne $pendingComputerName -and $activeComputerName.ComputerName -ne $pendingComputerName.ComputerName) {
+        $rebootReasons.Add('PendingComputerRename')
+    }
+
+    if (Test-Path -Path 'HKLM:\SOFTWARE\Microsoft\SMS\Mobile Client\Reboot Management\RebootData' -ErrorAction SilentlyContinue) {
+        $rebootReasons.Add('ConfigMgrRebootPending')
+    }
+
+    return [PSCustomObject]@{
+        IsPending = ($rebootReasons.Count -gt 0)
+        Reasons   = $rebootReasons.ToArray()
+    }
+}
+
 function Add-SPSScheduledTask {
     param
     (
@@ -209,54 +258,44 @@ function Add-SPSScheduledTask {
         Write-Output "Successfully created task folder '$TaskPath'"
     }
 
-    # Retrieve the scheduled task
-    $getScheduledTask = $TaskFolder.GetTasks(0) | Where-Object -FilterScript {
-        $_.Name -eq $Name
+    Write-Output '--------------------------------------------------------------'
+    Write-Output "Adding or updating '$Name' script in Task Scheduler Service ..."
+
+    # Get credentials for Task Schedule
+    $TaskAuthor = ([Security.Principal.WindowsIdentity]::GetCurrent()).Name # Author of the task
+    $TaskUser = $UserName # Username for task registration
+    $TaskUserPwd = $Password # Password for task registration
+
+    # Add a new Task Schedule
+    $TaskSchd = $TaskSvc.NewTask(0)
+    $TaskSchd.RegistrationInfo.Description = "$($Description)" # Task description
+    $TaskSchd.RegistrationInfo.Author = $TaskAuthor # Task author
+    $TaskSchd.Principal.RunLevel = 1 # Task run level (1 = Highest)
+
+    # Task Schedule - Modify Settings Section
+    $TaskSettings = $TaskSchd.Settings
+    $TaskSettings.AllowDemandStart = $true
+    $TaskSettings.Enabled = $true
+    $TaskSettings.Hidden = $false
+    $TaskSettings.StartWhenAvailable = $true
+
+    # Define the task action
+    $TaskAction = $TaskSchd.Actions.Create(0) # 0 = Executable action
+    $TaskAction.Path = $TaskCmd # Path to the executable
+    $TaskAction.Arguments = $ActionArguments # Arguments for the executable
+
+    try {
+        # Register/update the task (6 = create or update)
+        $TaskFolder.RegisterTaskDefinition($Name, $TaskSchd, 6, $TaskUser, $TaskUserPwd, 1)
+        Write-Output "Successfully added or updated '$Name' script in Task Scheduler Service"
     }
-
-    if ($getScheduledTask) {
-        Write-Warning -Message 'Scheduled Task already exists - skipping.' # Task already exists
-    }
-    else {
-        Write-Output '--------------------------------------------------------------'
-        Write-Output "Adding '$Name' script in Task Scheduler Service ..."
-
-        # Get credentials for Task Schedule
-        $TaskAuthor = ([Security.Principal.WindowsIdentity]::GetCurrent()).Name # Author of the task
-        $TaskUser = $UserName # Username for task registration
-        $TaskUserPwd = $Password # Password for task registration
-
-        # Add a new Task Schedule
-        $TaskSchd = $TaskSvc.NewTask(0)
-        $TaskSchd.RegistrationInfo.Description = "$($Description)" # Task description
-        $TaskSchd.RegistrationInfo.Author = $TaskAuthor # Task author
-        $TaskSchd.Principal.RunLevel = 1 # Task run level (1 = Highest)
-
-        # Task Schedule - Modify Settings Section
-        $TaskSettings = $TaskSchd.Settings
-        $TaskSettings.AllowDemandStart = $true
-        $TaskSettings.Enabled = $true
-        $TaskSettings.Hidden = $false
-        $TaskSettings.StartWhenAvailable = $true
-
-        # Define the task action
-        $TaskAction = $TaskSchd.Actions.Create(0) # 0 = Executable action
-        $TaskAction.Path = $TaskCmd # Path to the executable
-        $TaskAction.Arguments = $ActionArguments # Arguments for the executable
-
-        try {
-            # Register the task
-            $TaskFolder.RegisterTaskDefinition($Name, $TaskSchd, 6, $TaskUser, $TaskUserPwd, 1)
-            Write-Output "Successfully added '$Name' script in Task Scheduler Service"
-        }
-        catch {
-            $catchMessage = @"
-An error occurred while adding the script in scheduled task: $($Name)
+    catch {
+        $catchMessage = @"
+An error occurred while adding/updating the script in scheduled task: $($Name)
 ActionArguments: $($ActionArguments)
 Exception: $($_.Exception.Message)
 "@
-            Write-Error -Message $catchMessage # Handle any errors during task registration
-        }
+        Write-Error -Message $catchMessage # Handle any errors during task registration
     }
 }
 
@@ -317,42 +356,38 @@ function Start-SPSScheduledTask {
     (
         [Parameter(Mandatory = $true)]
         [System.String]
-        $Name
-    )
-    $getScheduledTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-    if ($getScheduledTask) {
-        if ($PSCmdlet.ShouldProcess($Name, 'Start scheduled task')) {
-            Start-ScheduledTask -TaskName $Name `
-                -TaskPath 'SharePoint' `
-                -ErrorAction SilentlyContinue
-        }
-    }
-    else {
-        Write-Output "Scheduled Task $Name does not exist in SharePoint Task Path"
-    }
-}
-
-function Get-SPSRebootStatus {
-    [CmdletBinding()]
-    param
-    (
-        [Parameter(Mandatory = $true)]
-        [System.String]
-        $Server,
+        $Name,
 
         [Parameter()]
-        [System.Management.Automation.PSCredential]
-        $InstallAccount
+        [System.String]
+        $TaskPath = 'SharePoint'
     )
 
-    $result = Invoke-SPSCommand -Credential $InstallAccount `
-        -Arguments @($PSBoundParameters, $MyInvocation.MyCommand.Source) `
-        -Server $Server `
-        -ScriptBlock {
-
-        $pending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-        return $pending
+    $normalizedTaskPath = if ($TaskPath.StartsWith('\')) {
+        $TaskPath
+    }
+    else {
+        "\$TaskPath"
+    }
+    if (-not $normalizedTaskPath.EndsWith('\')) {
+        $normalizedTaskPath = "$normalizedTaskPath\"
     }
 
-    return $result
+    $getScheduledTask = Get-ScheduledTask -TaskName $Name -TaskPath $normalizedTaskPath -ErrorAction SilentlyContinue
+    if (-not $getScheduledTask) {
+        throw "Scheduled Task $Name does not exist in $TaskPath Task Path"
+    }
+
+    if ($PSCmdlet.ShouldProcess($Name, 'Start scheduled task')) {
+        Start-ScheduledTask -TaskName $Name `
+            -TaskPath $normalizedTaskPath `
+            -ErrorAction Stop
+    }
+
+    $startedTask = Get-ScheduledTask -TaskName $Name -TaskPath $normalizedTaskPath -ErrorAction Stop
+    return [PSCustomObject]@{
+        Name     = $Name
+        TaskPath = $normalizedTaskPath
+        State    = $startedTask.State
+    }
 }

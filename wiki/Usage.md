@@ -18,7 +18,7 @@
 | `ConfigFile`     | Specifies the path to the configuration file.                                                                                                                                                                          |
 | `Sequence`       | (Optional) Specifies the Sequence for parallel upgrade Content DB.                                                                                                                                                     |
 | `Action`         | (Optional) Use the Action parameter equal to Install to add the script in taskscheduler, InstallAccount parameter need to be set. Use the Action parameter equal to Uninstall to remove the script from taskscheduler. |
-| `InstallAccount` | (Optional) Need parameter InstallAccount whent you use the Action parameter equal to Install or ProductUpdate.                                                                                                                          |
+| `InstallAccount` | (Optional) Need parameter InstallAccount when you use the Action parameter equal to Install.                                                                                                                          |
 
 ## Examples
 
@@ -49,7 +49,7 @@
 ### Example 5: ProductUpdate Usage Example
 
 ```powershell
-.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Action ProductUpdate -InstallAccount (Get-Credential)
+.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Action ProductUpdate
 ```
 
 ## Logging
@@ -58,7 +58,7 @@ The script logs the status of each task, including success or failure, and saves
 
 ## Error Handling
 
-- Ensure the provided credentials have access to the SharePoint Farm.
+- Ensure the account running the script has administrator rights and access to the SharePoint Farm.
 
 ## Notes
 

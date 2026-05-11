@@ -38,7 +38,7 @@ In the above example, the delegate computer value can be a wildcard name such as
 1. Install Cumulative Update binaries on each server by running the following command (or install manually):
 
 ```powershell
-.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action ProductUpdate -InstallAccount (Get-Credential)
+.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action ProductUpdate
 ```
 
 `ProductUpdate` runs the SharePoint installer directly and does not require any DSC module.
@@ -46,6 +46,8 @@ In the above example, the delegate computer value can be a wildcard name such as
 > [!IMPORTANT]
 > Configure the StoredCredential parameter in JSON before running the script in installation mode.
 > Run the Install mode with the same account than you used the in InstallAccount parameter
+
+`ProductUpdate` runs locally and does not require the `InstallAccount` parameter.
 
 ## Next Step
 

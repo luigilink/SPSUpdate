@@ -94,11 +94,11 @@ Describe 'SPSUpdate.ps1 Scheduled Task Existence Check' {
     }
 
     It 'uses existence check in Install action' {
-        $scriptContent | Should -Match '(?s)''Install''\s*\{.*Get-ScheduledTask -TaskName \$script:TaskNameFullScript -TaskPath "\\\$script:TaskPath"'
+        $scriptContent | Should -Match '(?s)''Install''\s*\{.*Get-ScheduledTask -TaskName \$script:TaskNameFullScript -TaskPath "\\\$script:TaskPath\\"'
     }
 
     It 'uses existence check in Default action' {
-        $scriptContent | Should -Match '(?s)Default\s*\{.*Get-ScheduledTask -TaskName \$taskName -TaskPath "\\\$script:TaskPath"'
+        $scriptContent | Should -Match '(?s)Default\s*\{.*Get-ScheduledTask -TaskName \$taskName -TaskPath "\\\$script:TaskPath\\"'
     }
 }
 
@@ -114,6 +114,18 @@ Describe 'SPSUpdate.ps1 Default Action Task Management' {
 
     It 'Default action passes -TaskPath to Start-SPSScheduledTask' {
         $scriptContent | Should -Match 'Start-SPSScheduledTask.*-TaskPath\s*\$script:TaskPath'
+    }
+
+    It 'Default action captures start result and enforces ErrorAction Stop' {
+        $scriptContent | Should -Match '\$startResult\s*=\s*Start-SPSScheduledTask\s+-Name\s+\$taskName\s+-TaskPath\s+\$script:TaskPath\s+-ErrorAction\s+Stop'
+    }
+
+    It 'Default action queries scheduled task state with TaskPath' {
+        $scriptContent | Should -Match 'Get-ScheduledTask\s+-TaskName\s+\$scheduledTask\s+-TaskPath\s+"\\\$script:TaskPath\\"'
+    }
+
+    It 'Default action treats Queued tasks as still active' {
+        $scriptContent | Should -Match '\$taskStatus\.State\s+-ne\s+''Running''\s+-and\s+\$taskStatus\.State\s+-ne\s+''Queued'''
     }
 
     It 'Default action passes -TaskPath to Add-SPSScheduledTask' {
@@ -173,7 +185,7 @@ Describe 'SPSUpdate.ps1 Content Validation' {
     }
 
     It 'defines the current script version' {
-        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.1\.0'''
+        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.1\.1'''
     }
 
     It 'imports util module' {
@@ -188,12 +200,25 @@ Describe 'SPSUpdate.ps1 Content Validation' {
         $scriptContent | Should -Match 'Start-Transcript'
     }
 
+    It 'guards Stop-Transcript behind TranscriptStarted state' {
+        $scriptContent | Should -Match '\$script:TranscriptStarted\s*=\s*\$false'
+        $scriptContent | Should -Match 'if\s*\(\$script:TranscriptStarted\)\s*\{\s*Stop-Transcript'
+    }
+
     It 'contains try-catch error handling' {
         $scriptContent | Should -Match 'try\s*\{|catch\s*\{'
     }
 
     It 'checks for administrator privileges' {
         $scriptContent | Should -Match 'Administrator'
+    }
+
+    It 'uses consolidated reboot detection for ProductUpdate' {
+        $scriptContent | Should -Match 'Test-SPSPendingReboot'
+    }
+
+    It 'does not contain legacy ProductUpdate MOF cleanup code' {
+        $scriptContent | Should -Not -Match 'Cleaning up DSC MOF File|\.mof'
     }
 }
 
