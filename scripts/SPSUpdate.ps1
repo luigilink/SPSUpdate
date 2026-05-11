@@ -37,13 +37,14 @@
     .NOTES
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
-    Date:		May 07, 2026
+    Date:		May 11, 2026
     Version:	3.1.1
 
     .LINK
     https://spjc.fr/
     https://github.com/luigilink/SPSUpdate
 #>
+[CmdletBinding()]
 param
 (
     [Parameter(Position = 0, Mandatory = $true)]
@@ -67,6 +68,12 @@ param
 )
 
 #region Initialization
+# When the script is invoked with -Verbose, forward that preference to all downstream commands
+# that support the common Verbose parameter, including imported module functions.
+if ($PSBoundParameters.ContainsKey('Verbose')) {
+    $PSDefaultParameterValues['*:Verbose'] = $true
+}
+
 # Clear the host console
 Clear-Host
 
@@ -194,9 +201,18 @@ else {
 }
 $DateStarted = Get-Date
 $psVersion = $PSVersionTable.PSVersion.ToString()
+$script:TranscriptStarted = $false
 
 # Start transcript to log the output
-Start-Transcript -Path $pathLogFile -IncludeInvocationHeader
+try {
+    Start-Transcript -Path $pathLogFile -IncludeInvocationHeader -ErrorAction Stop
+    $script:TranscriptStarted = $true
+    Write-Output "Transcript log file: $pathLogFile"
+}
+catch {
+    Write-Warning "Unable to start transcript: $($_.Exception.Message)"
+    Write-Output "Transcript disabled for this run. Intended log file path: $pathLogFile"
+}
 
 # Output the script information
 Write-Output '-----------------------------------------------'
@@ -215,7 +231,7 @@ Start-Process -FilePath "$env:SystemRoot\system32\powercfg.exe" -ArgumentList '/
 # 1. Load SharePoint Powershell Snapin or Import-Module
 try {
     $installedVersion = Get-SPSInstalledProductVersion
-    Write-Output "Installed SharePoint Product Version: $($installedVersion)"
+    Write-Output "Installed SharePoint Product Version: $($installedVersion.FileVersion)"
     if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999) {
         if ($null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue)) {
             Add-PSSnapin Microsoft.SharePoint.PowerShell
@@ -356,7 +372,7 @@ Exception: $_
                 Write-Output "Adding Scheduled Task $script:TaskNameFullScript in $script:TaskPath Task Path"
                     
                 # Check if task already exists
-                $existingTask = Get-ScheduledTask -TaskName $script:TaskNameFullScript -TaskPath "\$script:TaskPath" -ErrorAction SilentlyContinue
+                $existingTask = Get-ScheduledTask -TaskName $script:TaskNameFullScript -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
                 if ($null -ne $existingTask) {
                     Write-Warning "Scheduled task '$script:TaskNameFullScript' already exists. Removing and recreating..."
                     Remove-SPSScheduledTask -Name $script:TaskNameFullScript -TaskPath $script:TaskPath
@@ -393,7 +409,7 @@ Exception: $_
                         Write-Output "Adding Scheduled Task $taskName in $script:TaskPath Task Path"
                             
                         # Check if task already exists
-                        $existingTask = Get-ScheduledTask -TaskName $taskName -TaskPath "\$script:TaskPath" -ErrorAction SilentlyContinue
+                        $existingTask = Get-ScheduledTask -TaskName $taskName -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
                         if ($null -ne $existingTask) {
                             Write-Warning "Scheduled task '$taskName' already exists. Removing and recreating..."
                             Remove-SPSScheduledTask -Name $taskName -TaskPath $script:TaskPath
@@ -415,7 +431,10 @@ Exception: $_
 "@
                         Write-Error -Message $catchMessage # Handle any errors during task removal
                         Add-SPSUpdateEvent -Message $catchMessage -Source 'Add-SPSScheduledTask' -EntryType 'Error'
-                        Stop-Transcript
+                        if ($script:TranscriptStarted) {
+                            Stop-Transcript | Out-Null
+                            $script:TranscriptStarted = $false
+                        }
                         exit
                     }
                 }
@@ -444,12 +463,15 @@ Shutdown Services: $($jsonEnvCfg.Binaries.ShutdownServices)
                         'UnknownReason'
                     }
                     Write-Warning "A reboot is required on server: $($spTargetServer). Detected pending reboot markers: $rebootReasons. Please reboot the server and re-run the script."
-                    Stop-Transcript
+                    if ($script:TranscriptStarted) {
+                        Stop-Transcript | Out-Null
+                        $script:TranscriptStarted = $false
+                    }
                     exit
                 }
                 # Unblock setup file if it is blocked
                 Unblock-File -Path $fullSetupFilePath -Verbose
-                Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices
+                Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices -Verbose
             }
         }
         catch {
@@ -461,7 +483,10 @@ Exception: $_
 "@
             Write-Error -Message $catchMessage
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
-            Stop-Transcript
+            if ($script:TranscriptStarted) {
+                Stop-Transcript | Out-Null
+                $script:TranscriptStarted = $false
+            }
             exit
         }
     }
@@ -505,7 +530,10 @@ Exception: $_
 "@
                 Write-Error -Message $catchMessage
                 Add-SPSUpdateEvent -Message $catchMessage -Source 'Get-StoredCredential' -EntryType 'Error'
-                Stop-Transcript
+                if ($script:TranscriptStarted) {
+                    Stop-Transcript | Out-Null
+                    $script:TranscriptStarted = $false
+                }
                 exit
             }
             Write-Output "Update Script in progress | FULL Mode - Please Wait ..."
@@ -520,7 +548,7 @@ Exception: $_
                         Write-Output "Adding Scheduled Task $taskName in $script:TaskPath Task Path"
                         
                         # Check if task already exists
-                        $existingTask = Get-ScheduledTask -TaskName $taskName -TaskPath "\$script:TaskPath" -ErrorAction SilentlyContinue
+                        $existingTask = Get-ScheduledTask -TaskName $taskName -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
                         if ($null -ne $existingTask) {
                             Write-Warning "Scheduled task '$taskName' already exists. Removing and recreating..."
                             Remove-SPSScheduledTask -Name $taskName -TaskPath $script:TaskPath
@@ -542,7 +570,10 @@ Exception: $_
 "@
                         Write-Error -Message $catchMessage
                         Add-SPSUpdateEvent -Message $catchMessage -Source 'Add-SPSScheduledTask' -EntryType 'Error'
-                        Stop-Transcript
+                        if ($script:TranscriptStarted) {
+                            Stop-Transcript | Out-Null
+                            $script:TranscriptStarted = $false
+                        }
                         exit
                     }
                 }
@@ -552,7 +583,8 @@ Exception: $_
                     try {
                         $taskName = "$script:TaskNameSequencePrefix$taskId"
                         Write-Output "Running Scheduled Task $taskName in $script:TaskPath Task Path"
-                        Start-SPSScheduledTask -Name $taskName -TaskPath $script:TaskPath
+                        $startResult = Start-SPSScheduledTask -Name $taskName -TaskPath $script:TaskPath -ErrorAction Stop
+                        Write-Output "Start requested for $($startResult.Name) in $($startResult.TaskPath). Current state: $($startResult.State)"
                         Write-Output 'Avoid conflicts with OWSTimer process - Pause between 60 to 90 seconds'
                         Start-Sleep -Seconds (get-random (60..90))
                     }
@@ -583,8 +615,12 @@ Exception: $_
                 while (-not $allTasksFinished) {
                     $allTasksFinished = $true
                     foreach ($scheduledTask in $scheduledTasks) {
-                        $taskStatus = Get-ScheduledTask -TaskName $scheduledTask | Select-Object State
-                        if ($taskStatus.State -ne 'Running') {
+                        $taskStatus = Get-ScheduledTask -TaskName $scheduledTask -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
+                        if ($null -eq $taskStatus) {
+                            Write-Warning "Scheduled Task $scheduledTask was not found in $script:TaskPath Task Path"
+                            continue
+                        }
+                        if ($taskStatus.State -ne 'Running' -and $taskStatus.State -ne 'Queued') {
                             Write-Output "Scheduled Task $($scheduledTask) has finished or is not running"
                         }
                         else {
@@ -702,7 +738,10 @@ Write-Output "| SPSUpdate Script Completed"
 Write-Output "| Started on  - $DateStarted"
 Write-Output "| Ended on    - $DateEnded"
 Write-Output '-----------------------------------------------'
-Stop-Transcript
+if ($script:TranscriptStarted) {
+    Stop-Transcript | Out-Null
+    $script:TranscriptStarted = $false
+}
 $loadedModules = @('util', 'CredentialManager')
 $loadedModules | ForEach-Object { Remove-Module -Name $_ -ErrorAction SilentlyContinue }
 $error.Clear()

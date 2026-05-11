@@ -15,6 +15,7 @@ scripts/Modules/sps.util.psm1:
 tests/Modules/util.Tests.ps1:
 
 - Added tests for `Test-SPSPendingReboot` and module export validation for the new helper.
+- Added regression tests for `Start-SPSScheduledTask` `TaskPath` parameter support and task path normalization behavior.
 
 tests/Modules/sps.util.Tests.ps1:
 
@@ -27,6 +28,12 @@ tests/SPSUpdate.Tests.ps1:
 
 ### Fixed
 
+scripts/Modules/util.psm1:
+
+- Fixed `Start-SPSScheduledTask` to support `TaskPath` and use that path when resolving and starting tasks.
+- Normalized scheduled task paths to the expected `\<TaskPath>` format for `Get-ScheduledTask` and `Start-ScheduledTask`.
+- Changed `Add-SPSScheduledTask` behavior to create or update existing tasks instead of skipping them.
+
 scripts/Modules/sps.util.psm1:
 
 - Fixed runtime failure in `Get-SPSLocalVersionInfo` when `Clear-ComObject` was missing.
@@ -36,6 +43,9 @@ scripts/SPSUpdate.ps1:
 - Updated ProductUpdate to run update binaries without `InstallAccount`.
 - Replaced single reboot check with consolidated reboot detection and detailed marker reporting.
 - Removed legacy ProductUpdate `finally` block used for old DSC MOF cleanup.
+- Enabled script-level verbose forwarding (`-Verbose`) to downstream module cmdlets.
+- Added transcript file path output (`Transcript log file: ...`) at startup for easier log discovery.
+- Updated installed SharePoint version output to print `FileVersion` explicitly.
 
 ### Changed
 
