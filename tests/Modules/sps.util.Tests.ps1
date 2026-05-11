@@ -45,7 +45,7 @@ Describe 'Get-SPSLocalVersionInfo' {
 
 Describe 'Start-SPSProductUpdate' {
     It 'does not expose InstallAccount parameter anymore' {
-        $cmd = Get-Command -Name Start-SPSProductUpdate -Module sps.util
+        $cmd = Get-Command -Name Start-SPSProductUpdate -ErrorAction Stop
         $cmd.Parameters.Keys | Should -Not -Contain 'InstallAccount'
     }
 
