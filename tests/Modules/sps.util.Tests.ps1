@@ -128,7 +128,13 @@ Describe 'Start-SPSProductUpdate' {
 
 Describe 'Mount-SPSContentDatabase' {
     It 'is exported from sps.util module' {
-        Get-Command -Name Mount-SPSContentDatabase -Module sps.util | Should -Not -BeNullOrEmpty
+        # Inspect the module export table directly. Avoid `Get-Command -Module sps.util`
+        # because on Windows PowerShell 5.1 the -Module filter throws a terminating
+        # CommandNotFoundException for module names containing a dot, even when the
+        # function is loaded and callable (which the other tests in this Describe verify).
+        $module = Get-Module -Name 'sps.util'
+        $module | Should -Not -BeNullOrEmpty
+        $module.ExportedCommands.ContainsKey('Mount-SPSContentDatabase') | Should -BeTrue
     }
 
     It 'exposes Name, WebAppUrl and DatabaseServer parameters' {
