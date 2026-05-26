@@ -21,6 +21,12 @@
     Use the Action parameter equal to ProductUpdate if you want to run the ProductUpdate locally
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -ConfigFile 'contoso-PROD.json'
 
+    Use the Action parameter equal to InitContentDB if you want to (re)generate the ContentDatabase JSON
+    inventory file used to prepare a farm upgrade (for example SharePoint 2019 to Subscription Edition).
+    This action runs Initialize-SPSContentDbJsonFile against the local farm and overwrites the existing
+    inventory file so that it always reflects the current state of the source farm.
+    PS D:\> E:\SCRIPT\SPSUpdate.ps1 -Action InitContentDB -ConfigFile 'contoso-PROD.json'
+
     .PARAMETER Sequence
     Need parameter Sequence for SPS Farm, example:
     PS D:\> E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Sequence 1
@@ -33,12 +39,13 @@
     SPSUpdate.ps1 -Action Install -InstallAccount (Get-Credential) -ConfigFile 'contoso-PROD.json'
     SPSUpdate.ps1 -Action Uninstall -ConfigFile 'contoso-PROD.json'
     SPSUpdate.ps1 -Action ProductUpdate -ConfigFile 'contoso-PROD.json'
+    SPSUpdate.ps1 -Action InitContentDB -ConfigFile 'contoso-PROD.json'
 
     .NOTES
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
-    Date:		May 11, 2026
-    Version:	3.1.1
+    Date:		May 26, 2026
+    Version:	3.2.0
 
     .LINK
     https://spjc.fr/
@@ -53,7 +60,7 @@ param
     $ConfigFile, # Path to the configuration file
 
     [Parameter(Position = 1)]
-    [validateSet('Install', 'Uninstall', 'Default', 'ProductUpdate', IgnoreCase = $true)]
+    [validateSet('Install', 'Uninstall', 'Default', 'ProductUpdate', 'InitContentDB', IgnoreCase = $true)]
     [System.String]
     $Action = 'Default',
 
@@ -176,7 +183,7 @@ catch {
 }
 
 # Define variables
-$SPSUpdateVersion = '3.1.1'
+$SPSUpdateVersion = '3.2.0'
 $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
@@ -195,6 +202,9 @@ if ($PSBoundParameters.ContainsKey('Sequence')) {
 }
 elseif ($PSBoundParameters.ContainsKey('Action') -and $Action -eq 'ProductUpdate') {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_ProductUpdate-$($env:COMPUTERNAME)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
+}
+elseif ($PSBoundParameters.ContainsKey('Action') -and $Action -eq 'InitContentDB') {
+    $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_InitContentDB-$($env:COMPUTERNAME)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
 }
 else {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ($spsUpdateFileName + '.log')
@@ -251,9 +261,9 @@ Exception: $_
     Add-SPSUpdateEvent -Message $catchMessage -Source 'Get-SPSInstalledProductVersion' -EntryType 'Error'
 }
 
-# 2. Initialize or read ContentDatabase json file if UpgradeContentDatabase equal to true
+# 2. Initialize or read ContentDatabase json file if UpgradeContentDatabase or MountContentDatabase equal to true
 try {
-    if ($jsonEnvCfg.UpgradeContentDatabase) {
+    if ($jsonEnvCfg.UpgradeContentDatabase -or $jsonEnvCfg.MountContentDatabase) {
         if (-Not (Test-Path -Path $pathConfigFolder)) {
             # If the path does not exist, create the directory
             New-Item -ItemType Directory -Path $pathConfigFolder
@@ -282,6 +292,39 @@ Exception: $_
 
 # 3. Execute Action parameter
 switch ($Action) {
+    'InitContentDB' {
+        # (Re)generate the ContentDatabase inventory JSON file for the local farm.
+        # Typically used on a source farm (for example SP2019) to prepare an upgrade
+        # to a target farm (for example Subscription Edition) where the file will
+        # later be consumed by the MountContentDatabase flow.
+        try {
+            if (-Not (Test-Path -Path $pathConfigFolder)) {
+                New-Item -ItemType Directory -Path $pathConfigFolder -Force | Out-Null
+            }
+            Write-Output "Initializing ContentDatabase json file for SPFARM: $($spFarmName)"
+            Write-Output "Target file: $spsUpdateDBsPath"
+            Initialize-SPSContentDbJsonFile -Path $spsUpdateDBsPath
+            if (Test-Path -Path $spsUpdateDBsPath) {
+                Write-Output "ContentDatabase json file generated successfully: $spsUpdateDBsPath"
+            }
+            else {
+                throw "ContentDatabase json file was not created: $spsUpdateDBsPath"
+            }
+        }
+        catch {
+            $catchMessage = @"
+Failed to (re)Initialize ContentDatabase json file for SPFARM: $($spFarmName)
+Exception: $_
+"@
+            Write-Error -Message $catchMessage
+            Add-SPSUpdateEvent -Message $catchMessage -Source 'Initialize-SPSContentDbJsonFile' -EntryType 'Error'
+            if ($script:TranscriptStarted) {
+                Stop-Transcript | Out-Null
+                $script:TranscriptStarted = $false
+            }
+            exit
+        }
+    }
     'Uninstall' {
         # Remove scheduled Task for Update Full Script
         try {
@@ -393,8 +436,8 @@ Exception: $_
                 Write-Error -Message $catchMessage    
                 Add-SPSUpdateEvent -Message $catchMessage -Source 'Add-SPSScheduledTask' -EntryType 'Error'
             }
-            # Add scheduled Task for Upgrade SPContentDatabase if UpgradeContentDatabase equal to true
-            if ($jsonEnvCfg.UpgradeContentDatabase) {
+            # Add scheduled Task for Upgrade SPContentDatabase if UpgradeContentDatabase or MountContentDatabase equal to true
+            if ($jsonEnvCfg.UpgradeContentDatabase -or $jsonEnvCfg.MountContentDatabase) {
                 # Get credential from Credential Manager
                 $credential = Get-StoredCredential -Target "$($jsonEnvCfg.StoredCredential)" -ErrorAction SilentlyContinue
                 if ($null -eq $credential) {
@@ -453,22 +496,10 @@ SharePoint Server: $($spTargetServer)
 Setup File Path: $($fullSetupFilePath)
 Shutdown Services: $($jsonEnvCfg.Binaries.ShutdownServices)
 "@
-                Write-Output "Getting Reboot Status on server: $spTargetServer"
-                $rebootStatus = Test-SPSPendingReboot
-                if ($rebootStatus.IsPending) {
-                    $rebootReasons = if ($null -ne $rebootStatus.Reasons -and $rebootStatus.Reasons.Count -gt 0) {
-                        $rebootStatus.Reasons -join ', '
-                    }
-                    else {
-                        'UnknownReason'
-                    }
-                    Write-Warning "A reboot is required on server: $($spTargetServer). Detected pending reboot markers: $rebootReasons. Please reboot the server and re-run the script."
-                    if ($script:TranscriptStarted) {
-                        Stop-Transcript | Out-Null
-                        $script:TranscriptStarted = $false
-                    }
-                    exit
-                }
+                # NOTE: Pending reboot detection was removed because on production farms the
+                # Windows reboot markers (CBS, PendingFileRenameOperations, etc.) commonly
+                # remain set after several reboots, which caused the script to abort the
+                # ProductUpdate even when the system was actually in a healthy state.
                 # Unblock setup file if it is blocked
                 Unblock-File -Path $fullSetupFilePath -Verbose
                 Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $jsonEnvCfg.Binaries.ShutdownServices -Verbose
@@ -501,7 +532,30 @@ Exception: $_
                     4 { $dbs = $jsonDbCfg.SPContentDatabase4 }
                 }
                 foreach ($db in $dbs) {
-                    Update-SPSContentDatabase -Name $db.Name
+                    # Mount SPContentDatabase (typically used to attach databases coming from a
+                    # previous farm version, for example SP2019 -> Subscription Edition migration).
+                    # Mounts run inside each Sequence scheduled task, so the 4 sequences process
+                    # their respective DB groups in parallel. Each database list is loaded from
+                    # the ContentDatabase inventory JSON file produced by Initialize-SPSContentDbJsonFile.
+                    # Mount and Upgrade are independent: a farm can be configured for Mount only,
+                    # Upgrade only, or both (Mount then Upgrade for SP2019 -> SE migration).
+                    if ($jsonEnvCfg.MountContentDatabase) {
+                        try {
+                            Mount-SPSContentDatabase -Name $db.Name -WebAppUrl $db.WebAppUrl -DatabaseServer $db.Server
+                        }
+                        catch {
+                            $catchMessage = @"
+Failed to Mount SPContentDatabase '$($db.Name)' on WebApplication '$($db.WebAppUrl)'
+Target SPFarm: $($spFarmName)
+Exception: $_
+"@
+                            Write-Error -Message $catchMessage
+                            Add-SPSUpdateEvent -Message $catchMessage -Source 'Mount-SPSContentDatabase' -EntryType 'Error'
+                        }
+                    }
+                    if ($jsonEnvCfg.UpgradeContentDatabase) {
+                        Update-SPSContentDatabase -Name $db.Name
+                    }
                 }
             }
             catch {
@@ -537,8 +591,10 @@ Exception: $_
                 exit
             }
             Write-Output "Update Script in progress | FULL Mode - Please Wait ..."
-            # Update SPContentDatabase
-            if ($jsonEnvCfg.UpgradeContentDatabase) {
+            # Mount and/or Upgrade SPContentDatabase via parallel scheduled tasks.
+            # The sequence tasks themselves decide what to do for each database based on
+            # the MountContentDatabase and UpgradeContentDatabase flags in the JSON config.
+            if ($jsonEnvCfg.UpgradeContentDatabase -or $jsonEnvCfg.MountContentDatabase) {
                 # Add scheduled Task for Upgrade SPContentDatabase in Parallel
                 foreach ($taskId in (1..4)) {
                     try {

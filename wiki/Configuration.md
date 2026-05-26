@@ -18,6 +18,7 @@ To customize the script for your environment, you need to prepare a JSON configu
     "ShutdownServices": false
   },
   "UpgradeContentDatabase": true,
+  "MountContentDatabase": false,
   "SideBySideToken": {
     "Enable": true,
     "BuildVersion": "16.0.17928.20238"
@@ -42,6 +43,23 @@ Use `ProductUpdate`, `SetupFullPath`, `SetupFileName` and `ShutdownServices` par
 ## UpgradeContentDatabase
 
 The `UpgradeContentDatabase` parameter can be used to run upgrade-SPContentDatabase in parallel.
+
+The authorized values are : `true`, and `false`.
+
+## MountContentDatabase
+
+The `MountContentDatabase` parameter can be used to attach content databases to the
+target farm before the upgrade step. It is typically used in farm migration scenarios
+(for example SharePoint Server 2019 → Subscription Edition) where content databases
+restored from the source farm on the target SQL Server need to be mounted on the new
+farm.
+
+When set to `true`, the master server iterates through the ContentDatabase inventory
+JSON file (`<ApplicationName>-<ConfigurationName>-<FarmName>-ContentDBs.json`, normally
+generated on the source farm with the `InitContentDB` action) and runs
+`Mount-SPContentDatabase` for every database that is not already attached. Mounts are
+performed sequentially on the master server to avoid concurrent writes to the
+configuration database.
 
 The authorized values are : `true`, and `false`.
 

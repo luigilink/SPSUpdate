@@ -1,57 +1,38 @@
 # SPSUpdate - Release Notes
 
-## [3.1.1] - 2026-05-11
+## [3.2.0] - 2026-05-26
 
 ### Added
 
-scripts/Modules/util.psm1:
+scripts/SPSUpdate.ps1:
 
-- Added `Test-SPSPendingReboot` to detect pending reboot state using multiple Windows markers (Windows Update, CBS, pending file rename, pending computer rename, and ConfigMgr).
+- Added new `InitContentDB` value for the `Action` parameter that (re)generates the ContentDatabase inventory JSON file for the local farm. Intended to be run on the source farm before a farm upgrade (for example SharePoint Server 2019 → Subscription Edition).
+- Added new `MountContentDatabase` configuration property in the JSON config file. When `true`, the master server iterates through the ContentDatabase inventory JSON file and mounts every database that is not already attached to the farm. Mounts are performed sequentially to avoid concurrent writes to the configuration database.
+- Loader of the ContentDatabase inventory JSON file now also runs when `MountContentDatabase` is `true` (previously only when `UpgradeContentDatabase` was `true`).
+- Added dedicated transcript log file naming for the `InitContentDB` action.
 
 scripts/Modules/sps.util.psm1:
 
-- Added missing `Clear-ComObject` helper used by `Get-SPSLocalVersionInfo` to safely release COM objects.
-
-tests/Modules/util.Tests.ps1:
-
-- Added tests for `Test-SPSPendingReboot` and module export validation for the new helper.
-- Added regression tests for `Start-SPSScheduledTask` `TaskPath` parameter support and task path normalization behavior.
-
-tests/Modules/sps.util.Tests.ps1:
-
-- Added regression test ensuring `Start-SPSProductUpdate` no longer exposes `InstallAccount`.
+- Added `Mount-SPSContentDatabase` wrapper around `Mount-SPContentDatabase`. The wrapper validates the target web application, skips databases that are already attached, and accepts an optional `DatabaseServer` parameter.
 
 tests/SPSUpdate.Tests.ps1:
 
-- Added assertions for consolidated reboot detection (`Test-SPSPendingReboot`) in ProductUpdate flow.
-- Added regression assertion to prevent reintroduction of legacy ProductUpdate MOF cleanup code.
+- Added assertions for the new `InitContentDB` action and the `MountContentDatabase` flow.
+- Added regression test that the ProductUpdate flow no longer calls `Test-SPSPendingReboot`.
 
-### Fixed
+tests/Modules/sps.util.Tests.ps1:
 
-scripts/Modules/util.psm1:
-
-- Fixed `Start-SPSScheduledTask` to support `TaskPath` and use that path when resolving and starting tasks.
-- Normalized scheduled task paths to the expected `\<TaskPath>` format for `Get-ScheduledTask` and `Start-ScheduledTask`.
-- Changed `Add-SPSScheduledTask` behavior to create or update existing tasks instead of skipping them.
-
-scripts/Modules/sps.util.psm1:
-
-- Fixed runtime failure in `Get-SPSLocalVersionInfo` when `Clear-ComObject` was missing.
-
-scripts/SPSUpdate.ps1:
-
-- Updated ProductUpdate to run update binaries without `InstallAccount`.
-- Replaced single reboot check with consolidated reboot detection and detailed marker reporting.
-- Removed legacy ProductUpdate `finally` block used for old DSC MOF cleanup.
-- Enabled script-level verbose forwarding (`-Verbose`) to downstream module cmdlets.
-- Added transcript file path output (`Transcript log file: ...`) at startup for easier log discovery.
-- Updated installed SharePoint version output to print `FileVersion` explicitly.
+- Added tests for `Mount-SPSContentDatabase` (export, parameters, idempotency when the DB is already attached, mounting when missing, error when the web application is not found).
 
 ### Changed
 
-Documentation:
+scripts/SPSUpdate.ps1:
 
-- Updated ProductUpdate examples and guidance to remove `InstallAccount` requirement.
-- Removed stale references to temporary MOF cleanup after ProductUpdate.
+- Bumped `$SPSUpdateVersion` to `3.2.0`.
+- Removed the blocking pending-reboot check from the `ProductUpdate` action. On production farms the Windows reboot markers (Component Based Servicing, `PendingFileRenameOperations`, etc.) commonly remain set after several reboots, which was causing legitimate updates to be aborted. The `Test-SPSPendingReboot` helper is kept available in `util.psm1` for ad-hoc usage.
+
+### Documentation
+
+- Updated `scripts/SPSUpdate_README.md`, `wiki/Configuration.md` and `wiki/Usage.md` to document the new `InitContentDB` action, the new `MountContentDatabase` JSON property and the removal of the blocking pending-reboot check from `ProductUpdate`.
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)

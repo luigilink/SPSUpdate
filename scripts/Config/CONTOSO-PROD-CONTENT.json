@@ -12,6 +12,7 @@
     "SetupFileName": ["uber-subscription-kb5002651-fullfile-x64-glb.exe"],
     "ShutdownServices": false
   },
+  "MountContentDatabase": true,
   "UpgradeContentDatabase": true,
   "SideBySideToken": {
     "Enable": true,

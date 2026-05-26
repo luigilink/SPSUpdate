@@ -13,12 +13,12 @@
 
 ## Parameters
 
-| Parameter         | Description                                                                                                                                                                                                            |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ConfigFile`     | Specifies the path to the configuration file.                                                                                                                                                                          |
-| `Sequence`       | (Optional) Specifies the Sequence for parallel upgrade Content DB.                                                                                                                                                     |
-| `Action`         | (Optional) Use the Action parameter equal to Install to add the script in taskscheduler, InstallAccount parameter need to be set. Use the Action parameter equal to Uninstall to remove the script from taskscheduler. |
-| `InstallAccount` | (Optional) Need parameter InstallAccount when you use the Action parameter equal to Install.                                                                                                                          |
+| Parameter         | Description                                                                                                                                                                                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ConfigFile`     | Specifies the path to the configuration file.                                                                                                                                                                                                                                                     |
+| `Sequence`       | (Optional) Specifies the Sequence for parallel upgrade Content DB.                                                                                                                                                                                                                                |
+| `Action`         | (Optional) Accepts `Install`, `Uninstall`, `Default`, `ProductUpdate` or `InitContentDB`. `Install`/`Uninstall` manage the scheduled tasks (requires `InstallAccount` for `Install`). `ProductUpdate` installs the binaries locally. `InitContentDB` (re)generates the ContentDatabase inventory JSON file. |
+| `InstallAccount` | (Optional) Need parameter InstallAccount when you use the Action parameter equal to Install.                                                                                                                                                                                                      |
 
 ## Examples
 
@@ -51,6 +51,18 @@
 ```powershell
 .\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Action ProductUpdate
 ```
+
+### Example 6: InitContentDB Usage Example (source farm)
+
+```powershell
+.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD.json' -Action InitContentDB
+```
+
+This action (re)generates the ContentDatabase inventory JSON file
+(`<ApplicationName>-<ConfigurationName>-<FarmName>-ContentDBs.json`) for the local farm.
+It is typically used on the source farm before a farm upgrade (for example
+SharePoint Server 2019 → Subscription Edition) so that the inventory can be copied to
+the target farm and consumed by the `MountContentDatabase` flow.
 
 ## Logging
 
