@@ -14,6 +14,22 @@ if (-not (Get-Command -Name Stop-Service -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command -Name Start-Service -ErrorAction SilentlyContinue)) {
     function global:Start-Service { param([string]$Name) }
 }
+if (-not (Get-Command -Name Get-SPContentDatabase -ErrorAction SilentlyContinue)) {
+    function global:Get-SPContentDatabase { param([string]$Identity) }
+}
+if (-not (Get-Command -Name Get-SPWebApplication -ErrorAction SilentlyContinue)) {
+    function global:Get-SPWebApplication { param([string]$Identity) }
+}
+if (-not (Get-Command -Name Mount-SPContentDatabase -ErrorAction SilentlyContinue)) {
+    function global:Mount-SPContentDatabase {
+        param(
+            [string]$Name,
+            [string]$WebApplication,
+            [string]$DatabaseServer,
+            [switch]$Confirm
+        )
+    }
+}
 
 Describe 'Get-SPSLocalVersionInfo' {
     It 'returns product DisplayVersion when patch metadata is missing' {
@@ -107,5 +123,64 @@ Describe 'Start-SPSProductUpdate' {
         Assert-MockCalled -ModuleName sps.util -CommandName Set-Service -Times 1 -ParameterFilter {
             $Name -eq 'SPSearchHostController' -and $StartupType -eq 'Manual'
         }
+    }
+}
+
+Describe 'Mount-SPSContentDatabase' {
+    It 'is exported from sps.util module' {
+        $cmd = Get-Command -Name Mount-SPSContentDatabase -ErrorAction Stop
+        $cmd | Should -Not -BeNullOrEmpty
+        $cmd.CommandType | Should -Be 'Function'
+        $cmd.ModuleName | Should -Not -BeNullOrEmpty
+    }
+
+    It 'exposes Name, WebAppUrl and DatabaseServer parameters' {
+        $cmd = Get-Command -Name Mount-SPSContentDatabase -ErrorAction Stop
+        $cmd.Parameters.Keys | Should -Contain 'Name'
+        $cmd.Parameters.Keys | Should -Contain 'WebAppUrl'
+        $cmd.Parameters.Keys | Should -Contain 'DatabaseServer'
+    }
+
+    It 'skips mounting when the content database is already attached to the farm' {
+        Mock -ModuleName sps.util -CommandName Get-SPContentDatabase -MockWith {
+            [pscustomobject]@{ Name = 'WSS_Content_Test' }
+        }
+        Mock -ModuleName sps.util -CommandName Get-SPWebApplication -MockWith {
+            [pscustomobject]@{ Url = 'https://intranet.contoso.com' }
+        }
+        Mock -ModuleName sps.util -CommandName Mount-SPContentDatabase
+        Mock -ModuleName sps.util -CommandName Add-SPSUpdateEvent
+
+        Mount-SPSContentDatabase -Name 'WSS_Content_Test' -WebAppUrl 'https://intranet.contoso.com'
+
+        Assert-MockCalled -ModuleName sps.util -CommandName Mount-SPContentDatabase -Times 0 -Exactly
+    }
+
+    It 'mounts the database when it is not already attached' {
+        Mock -ModuleName sps.util -CommandName Get-SPContentDatabase -MockWith { $null }
+        Mock -ModuleName sps.util -CommandName Get-SPWebApplication -MockWith {
+            [pscustomobject]@{ Url = 'https://intranet.contoso.com' }
+        }
+        Mock -ModuleName sps.util -CommandName Mount-SPContentDatabase
+        Mock -ModuleName sps.util -CommandName Add-SPSUpdateEvent
+
+        Mount-SPSContentDatabase -Name 'WSS_Content_New' -WebAppUrl 'https://intranet.contoso.com' -DatabaseServer 'SQL01'
+
+        Assert-MockCalled -ModuleName sps.util -CommandName Mount-SPContentDatabase -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'WSS_Content_New' -and $WebApplication -eq 'https://intranet.contoso.com' -and $DatabaseServer -eq 'SQL01'
+        }
+    }
+
+    It 'throws when the target web application does not exist' {
+        Mock -ModuleName sps.util -CommandName Get-SPContentDatabase -MockWith { $null }
+        Mock -ModuleName sps.util -CommandName Get-SPWebApplication -MockWith { $null }
+        Mock -ModuleName sps.util -CommandName Mount-SPContentDatabase
+        Mock -ModuleName sps.util -CommandName Add-SPSUpdateEvent
+
+        { Mount-SPSContentDatabase -Name 'WSS_Content_Orphan' -WebAppUrl 'https://missing.contoso.com' } |
+            Should -Throw '*SPWebApplication*not found*'
+
+        Assert-MockCalled -ModuleName sps.util -CommandName Mount-SPContentDatabase -Times 0 -Exactly
+        Assert-MockCalled -ModuleName sps.util -CommandName Add-SPSUpdateEvent -Times 1 -Exactly
     }
 }

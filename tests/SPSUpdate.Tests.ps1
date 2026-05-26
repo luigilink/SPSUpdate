@@ -185,7 +185,7 @@ Describe 'SPSUpdate.ps1 Content Validation' {
     }
 
     It 'defines the current script version' {
-        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.1\.1'''
+        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.2\.0'''
     }
 
     It 'imports util module' {
@@ -213,12 +213,41 @@ Describe 'SPSUpdate.ps1 Content Validation' {
         $scriptContent | Should -Match 'Administrator'
     }
 
-    It 'uses consolidated reboot detection for ProductUpdate' {
-        $scriptContent | Should -Match 'Test-SPSPendingReboot'
+    It 'does not call Test-SPSPendingReboot in ProductUpdate flow' {
+        $scriptContent | Should -Not -Match 'Test-SPSPendingReboot'
     }
 
     It 'does not contain legacy ProductUpdate MOF cleanup code' {
         $scriptContent | Should -Not -Match 'Cleaning up DSC MOF File|\.mof'
+    }
+
+    It 'declares InitContentDB in the Action validateSet' {
+        $scriptContent | Should -Match "validateSet\([^)]*'InitContentDB'"
+    }
+
+    It 'implements the InitContentDB switch case' {
+        $scriptContent | Should -Match "(?s)'InitContentDB'\s*\{.*Initialize-SPSContentDbJsonFile\s+-Path\s+\`$spsUpdateDBsPath"
+    }
+
+    It 'invokes Mount-SPSContentDatabase when MountContentDatabase is enabled' {
+        $scriptContent | Should -Match '(?s)if\s*\(\s*\$jsonEnvCfg\.MountContentDatabase\s*\).*Mount-SPSContentDatabase'
+    }
+
+    It 'loads ContentDatabase json file when MountContentDatabase is enabled' {
+        $scriptContent | Should -Match '\$jsonEnvCfg\.UpgradeContentDatabase\s*-or\s*\$jsonEnvCfg\.MountContentDatabase'
+    }
+
+    It 'spawns parallel scheduled tasks when MountContentDatabase or UpgradeContentDatabase is enabled' {
+        # Loader (top of script), Default master branch and Install branch must all use the OR condition
+        ([regex]::Matches($scriptContent, '\$jsonEnvCfg\.UpgradeContentDatabase\s*-or\s*\$jsonEnvCfg\.MountContentDatabase')).Count | Should -BeGreaterOrEqual 3
+    }
+
+    It 'gates Update-SPSContentDatabase inside Sequence loop with UpgradeContentDatabase flag' {
+        $scriptContent | Should -Match '(?s)if\s*\(\s*\$jsonEnvCfg\.UpgradeContentDatabase\s*\)\s*\{\s*Update-SPSContentDatabase\s+-Name\s+\$db\.Name'
+    }
+
+    It 'runs Mount-SPSContentDatabase inside the per-DB Sequence loop (parallel via 4 sequences)' {
+        $scriptContent | Should -Match '(?s)foreach\s*\(\s*\$db\s+in\s+\$dbs\s*\)\s*\{[^}]*if\s*\(\s*\$jsonEnvCfg\.MountContentDatabase\s*\)[^}]*Mount-SPSContentDatabase\s+-Name\s+\$db\.Name\s+-WebAppUrl\s+\$db\.WebAppUrl\s+-DatabaseServer\s+\$db\.Server'
     }
 }
 

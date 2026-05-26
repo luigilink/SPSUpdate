@@ -44,6 +44,7 @@ To customize the script for your environment, you need to prepare a JSON configu
     "ShutdownServices": false
   },
   "UpgradeContentDatabase": true,
+  "MountContentDatabase": false,
   "SideBySideToken": {
     "Enable": true,
     "BuildVersion": "16.0.17928.20238"
@@ -68,6 +69,23 @@ Use `ProductUpdate`, `SetupFullPath`, `SetupFileName` and `ShutdownServices` par
 #### UpgradeContentDatabase
 
 The `UpgradeContentDatabase` parameter can be used to run upgrade-SPContentDatabase in parallel.
+
+The authorized values are : `true`, and `false`.
+
+#### MountContentDatabase
+
+The `MountContentDatabase` parameter can be used to mount content databases on the target
+farm before the upgrade. This is typically used during a farm migration scenario (for
+example SharePoint Server 2019 → Subscription Edition) where databases coming from the
+source farm have been restored on the SQL Server of the target farm and now need to be
+attached to it.
+
+When set to `true`, the script loads the ContentDatabase inventory JSON file
+(`<ApplicationName>-<ConfigurationName>-<FarmName>-ContentDBs.json`) and runs
+`Mount-SPContentDatabase` for each database that is not already attached. Mounts are
+performed sequentially on the master server to avoid concurrent writes to the
+configuration database. The inventory JSON file is normally generated on the source farm
+with the `InitContentDB` action and then copied next to the script on the target farm.
 
 The authorized values are : `true`, and `false`.
 
@@ -103,13 +121,36 @@ E:\SCRIPT\SPSUpdate.ps1 -Action ProductUpdate -ConfigFile 'E\SCRIPTS\Config\cont
 
 This will:
 
-- Getting Reboot Status on server
 - Unblock cumulative update files if it is blocked
 - Running Start-SPSProductUpdate function
 
-## 🔄 Uninstalling
+> Note: Starting with version 3.2.0 the ProductUpdate action no longer aborts when the
+> Windows reboot markers (Component Based Servicing, PendingFileRenameOperations, etc.)
+> are still present, because those markers were observed to persist on healthy production
+> farms even after multiple reboots and were blocking legitimate updates.
 
-To remove the scheduled tasks:
+### 5. Run Script with InitContentDB Action parameter (source farm)
+
+The `InitContentDB` action (re)generates the ContentDatabase inventory JSON file
+(`<ApplicationName>-<ConfigurationName>-<FarmName>-ContentDBs.json`) located in the
+`Config` folder next to the script. It is typically used on the source farm before a
+farm upgrade (for example SharePoint Server 2019 → Subscription Edition) so that the
+generated inventory can be copied to the target farm to drive the
+`MountContentDatabase` step.
+
+On the source SharePoint Server, open PowerShell as Administrator and execute:
+
+```powershell
+E:\SCRIPT\SPSUpdate.ps1 -Action InitContentDB -ConfigFile 'E\SCRIPTS\Config\contoso-PROD-CONTENT.json'
+```
+
+This will:
+
+- Run `Initialize-SPSContentDbJsonFile` against the local farm
+- Overwrite any existing inventory file so it always reflects the current state of the farm
+- Produce a JSON file split into 4 balanced groups (`SPContentDatabase1` to `SPContentDatabase4`) that can be consumed by the Mount and parallel Upgrade flows on the target farm
+
+## 🔄 Uninstalling
 
 ```powershell
 E:\SCRIPT\SPSUpdate.ps1 -Action Uninstall
@@ -121,6 +162,7 @@ E:\SCRIPT\SPSUpdate.ps1 -Action Uninstall
 - It verifies script is running with Administrator rights before proceeding.
 - It detects installed SharePoint version (Get-SPSInstalledProductVersion) and loads the appropriate SharePoint snap-in or module.
 - The Full-run mode creates 4 sequence tasks (SPSUpdate-Sequence1..4) and starts them in parallel (with random short sleeps to avoid OWSTimer conflicts)
+- When `MountContentDatabase` is `true`, the master server attaches the content databases listed in the inventory JSON file (skipping databases that are already mounted) before launching the parallel upgrade tasks.
 - The script runs Start-SPSConfigExe locally and Start-SPSConfigExeRemote for other servers; configures SideBySide token (Set-SPSSideBySideToken) and copies side-by-side files remotely if enabled.
 
 ## 📄 License
