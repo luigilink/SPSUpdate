@@ -1,38 +1,30 @@
 # SPSUpdate - Release Notes
 
-## [3.2.0] - 2026-05-26
-
-### Added
-
-scripts/SPSUpdate.ps1:
-
-- Added new `InitContentDB` value for the `Action` parameter that (re)generates the ContentDatabase inventory JSON file for the local farm. Intended to be run on the source farm before a farm upgrade (for example SharePoint Server 2019 → Subscription Edition).
-- Added new `MountContentDatabase` configuration property in the JSON config file. When `true`, the master server iterates through the ContentDatabase inventory JSON file and mounts every database that is not already attached to the farm. Mounts are performed sequentially to avoid concurrent writes to the configuration database.
-- Loader of the ContentDatabase inventory JSON file now also runs when `MountContentDatabase` is `true` (previously only when `UpgradeContentDatabase` was `true`).
-- Added dedicated transcript log file naming for the `InitContentDB` action.
-
-scripts/Modules/sps.util.psm1:
-
-- Added `Mount-SPSContentDatabase` wrapper around `Mount-SPContentDatabase`. The wrapper validates the target web application, skips databases that are already attached, and accepts an optional `DatabaseServer` parameter.
-
-tests/SPSUpdate.Tests.ps1:
-
-- Added assertions for the new `InitContentDB` action and the `MountContentDatabase` flow.
-- Added regression test that the ProductUpdate flow no longer calls `Test-SPSPendingReboot`.
-
-tests/Modules/sps.util.Tests.ps1:
-
-- Added tests for `Mount-SPSContentDatabase` (export, parameters, idempotency when the DB is already attached, mounting when missing, error when the web application is not found).
+## [3.2.1] - 2026-06-11
 
 ### Changed
 
+scripts/Modules/sps.util.psm1:
+
+- `Initialize-SPSContentDbJsonFile` now distributes content databases across the four sequences using a **Longest Processing Time First (LPT)** algorithm based on `DiskSizeRequired`, instead of splitting them evenly by count (`floor(count / 4)`). Sequences are now balanced by total database size so parallel upgrade workloads finish closer to the same time.
+- `Initialize-SPSContentDbJsonFile` now prints a distribution report to the transcript showing the count, total size (MB) and percentage for each of the four sequences.
+- `Initialize-SPSContentDbJsonFile` now also writes a timestamped snapshot of the inventory (`<basename>_yyyy-MM-dd_HH-mm-ss.json`) next to the canonical file each time it runs. The canonical file (consumed by `SPSUpdate.ps1`) is still overwritten in place, while the dated snapshots accumulate in `scripts/Config/` so previous inventories can be reviewed or restored. Snapshot failures are logged via `Write-Verbose` and never block the canonical write.
+- `Start-SPSProductUpdate` now invokes the SharePoint patch setup with `/passive` instead of `/quiet`. `/passive` still runs the patch without user interaction but displays a progress UI, which gives administrators visibility on the installation progress when the script is run interactively. Behavior of the returned exit code and the post-install service-restoration logic is unchanged.
+
 scripts/SPSUpdate.ps1:
 
-- Bumped `$SPSUpdateVersion` to `3.2.0`.
-- Removed the blocking pending-reboot check from the `ProductUpdate` action. On production farms the Windows reboot markers (Component Based Servicing, `PendingFileRenameOperations`, etc.) commonly remain set after several reboots, which was causing legitimate updates to be aborted. The `Test-SPSPendingReboot` helper is kept available in `util.psm1` for ad-hoc usage.
+- Bumped `$SPSUpdateVersion` to `3.2.1`.
 
-### Documentation
+### Fixed
 
-- Updated `scripts/SPSUpdate_README.md`, `wiki/Configuration.md` and `wiki/Usage.md` to document the new `InitContentDB` action, the new `MountContentDatabase` JSON property and the removal of the blocking pending-reboot check from `ProductUpdate`.
+scripts/Modules/sps.util.psm1:
+
+- Fixed `Initialize-SPSContentDbJsonFile` edge case where fewer than 4 content databases caused `groupSize` to evaluate to `0`, dumping every database into `SPContentDatabase4` and leaving `SPContentDatabase1..3` empty.
+
+### Tests
+
+tests/Modules/sps.util.Tests.ps1:
+
+- Added Pester tests for `Initialize-SPSContentDbJsonFile` covering: no file written when `Get-SPContentDatabase` returns `$null`, fair distribution of fewer than 4 databases (regression for the `floor(count / 4)` bug), LPT balancing by size (the largest database lands alone in its sequence), and the `SPContentDatabase1..4` JSON property contract consumed by `SPSUpdate.ps1`.
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)

@@ -185,7 +185,7 @@ Describe 'SPSUpdate.ps1 Content Validation' {
     }
 
     It 'defines the current script version' {
-        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.2\.0'''
+        $scriptContent | Should -Match '\$SPSUpdateVersion\s*=\s*''3\.2\.1'''
     }
 
     It 'imports util module' {

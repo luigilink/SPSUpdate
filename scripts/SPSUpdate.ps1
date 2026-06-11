@@ -44,8 +44,8 @@
     .NOTES
     FileName:	SPSUpdate.ps1
     Author:		Jean-Cyril DROUHIN
-    Date:		May 26, 2026
-    Version:	3.2.0
+    Date:		June 11, 2026
+    Version:	3.2.1
 
     .LINK
     https://spjc.fr/
@@ -183,7 +183,7 @@ catch {
 }
 
 # Define variables
-$SPSUpdateVersion = '3.2.0'
+$SPSUpdateVersion = '3.2.1'
 $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
