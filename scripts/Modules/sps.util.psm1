@@ -418,41 +418,54 @@ function Initialize-SPSContentDbJsonFile {
     $spAllDatabases = Get-SPContentDatabase -ErrorAction SilentlyContinue
 
     if ($null -ne $spAllDatabases) {
-        #Calculate the number of databases in each group
-        $groupSize = [math]::Floor($spAllDatabases.Count / 4)
-        #Loop through each content database and assign to groups
-        for ($i = 0; $i -lt $spAllDatabases.Count; $i++) {
-            $spDatabase = $spAllDatabases[$i]
-            #Determine which group to add the database to
-            if ($i -lt $groupSize) {
-                [void]$tbSPContentDb1.Add([SPDbContent]@{
-                        Name      = $spDatabase.Name;
-                        Server    = $spDatabase.Server;
-                        WebAppUrl = $spDatabase.WebApplication.Url;
-                    })
+        # --- LPT (Longest Processing Time First) scheduling ---
+        # Balance databases across 4 sequences by total DiskSizeRequired
+        # rather than by count, so parallel upgrade workloads finish closer
+        # to the same time.
+
+        # 1. Sort databases by size descending
+        $spSortedDatabases = $spAllDatabases |
+            Sort-Object -Property DiskSizeRequired -Descending
+
+        # 2. Track cumulative load (bytes) per sequence (index 0 = Seq1 .. 3 = Seq4)
+        $sequenceLoad  = @(0.0, 0.0, 0.0, 0.0)
+        $sequenceLists = @($tbSPContentDb1, $tbSPContentDb2, $tbSPContentDb3, $tbSPContentDb4)
+
+        # 3. Assign each database to the sequence with the lowest current load
+        foreach ($spDatabase in $spSortedDatabases) {
+            $minLoad  = $sequenceLoad[0]
+            $minIndex = 0
+            for ($s = 1; $s -lt 4; $s++) {
+                if ($sequenceLoad[$s] -lt $minLoad) {
+                    $minLoad  = $sequenceLoad[$s]
+                    $minIndex = $s
+                }
             }
-            elseif ($i -lt ($groupSize * 2)) {
-                [void]$tbSPContentDb2.Add([SPDbContent]@{
-                        Name      = $spDatabase.Name;
-                        Server    = $spDatabase.Server;
-                        WebAppUrl = $spDatabase.WebApplication.Url;
-                    })
-            }
-            elseif ($i -lt ($groupSize * 3)) {
-                [void]$tbSPContentDb3.Add([SPDbContent]@{
-                        Name      = $spDatabase.Name;
-                        Server    = $spDatabase.Server;
-                        WebAppUrl = $spDatabase.WebApplication.Url;
-                    })
-            }
-            else {
-                [void]$tbSPContentDb4.Add([SPDbContent]@{
-                        Name      = $spDatabase.Name;
-                        Server    = $spDatabase.Server;
-                        WebAppUrl = $spDatabase.WebApplication.Url;
-                    })
-            }
+            [void]$sequenceLists[$minIndex].Add([SPDbContent]@{
+                    Name      = $spDatabase.Name;
+                    Server    = $spDatabase.Server;
+                    WebAppUrl = $spDatabase.WebApplication.Url;
+                })
+            $sequenceLoad[$minIndex] += $spDatabase.DiskSizeRequired
         }
+
+        # --- Distribution report (visible in transcript) ---
+        $totalBytes = ($sequenceLoad | Measure-Object -Sum).Sum
+        $totalMB    = [math]::Round($totalBytes / 1MB, 0)
+        $dbCount    = @($spSortedDatabases).Count
+        Write-Output '--- ContentDatabase Distribution Report ---'
+        Write-Output ("Total : {0} database(s) | {1:N0} MB" -f $dbCount, $totalMB)
+        for ($s = 0; $s -lt 4; $s++) {
+            $loadMB = [math]::Round($sequenceLoad[$s] / 1MB, 0)
+            $pct    = if ($totalBytes -gt 0) {
+                [math]::Round($sequenceLoad[$s] / $totalBytes * 100, 1)
+            }
+            else { 0 }
+            Write-Output ("  Sequence {0} : {1,3} database(s) | {2,7:N0} MB | {3,5:N1}%" `
+                    -f ($s + 1), $sequenceLists[$s].Count, $loadMB, $pct)
+        }
+        Write-Output '-------------------------------------------'
+
         #Add each array to jsonObject
         $jsonObject | Add-Member -MemberType NoteProperty `
             -Name 'SPContentDatabase1' `
@@ -470,8 +483,30 @@ function Initialize-SPSContentDbJsonFile {
             -Name 'SPContentDatabase4' `
             -Value $tbSPContentDb4
 
-        #Convert jsonObject to JSON and save to a file
-        $jsonObject | ConvertTo-Json | Set-Content -Path $Path -Force
+        # Serialize once and write both the canonical file (consumed by SPSUpdate.ps1)
+        # and a timestamped snapshot in the same folder so previous inventories are
+        # retained for troubleshooting and rollback.
+        $jsonPayload = $jsonObject | ConvertTo-Json
+        $jsonPayload | Set-Content -Path $Path -Force
+
+        try {
+            $snapshotDir       = [System.IO.Path]::GetDirectoryName($Path)
+            $snapshotBaseName  = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+            $snapshotExtension = [System.IO.Path]::GetExtension($Path)
+            $snapshotTimestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
+            $snapshotFileName  = '{0}_{1}{2}' -f $snapshotBaseName, $snapshotTimestamp, $snapshotExtension
+            $snapshotPath      = if ([string]::IsNullOrEmpty($snapshotDir)) {
+                $snapshotFileName
+            }
+            else {
+                Join-Path -Path $snapshotDir -ChildPath $snapshotFileName
+            }
+            $jsonPayload | Set-Content -Path $snapshotPath -Force
+            Write-Output "ContentDatabase inventory snapshot saved to: $snapshotPath"
+        }
+        catch {
+            Write-Verbose -Message "Failed to write ContentDatabase inventory snapshot: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -682,7 +717,7 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
 
         }
 
-        $setupInstall = Start-Process -FilePath $SetupFile -ArgumentList '/quiet /passive' -Wait -PassThru
+        $setupInstall = Start-Process -FilePath $SetupFile -ArgumentList '/passive' -Wait -PassThru
         # Error codes: https://aka.ms/installerrorcodes
         switch ($setupInstall.ExitCode) {
             0 {
