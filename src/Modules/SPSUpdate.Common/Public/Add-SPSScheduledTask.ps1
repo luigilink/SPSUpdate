@@ -70,8 +70,9 @@
     $TaskAction.Arguments = $ActionArguments # Arguments for the executable
 
     try {
-        # Register/update the task (6 = create or update)
-        $TaskFolder.RegisterTaskDefinition($Name, $TaskSchd, 6, $TaskUser, $TaskUserPwd, 1)
+        # Register/update the task (6 = create or update). Cast to [void] so the
+        # returned RegisteredTask COM object is not dumped into the transcript.
+        [void]$TaskFolder.RegisterTaskDefinition($Name, $TaskSchd, 6, $TaskUser, $TaskUserPwd, 1)
         Write-Output "Successfully added or updated '$Name' script in Task Scheduler Service"
     }
     catch {
