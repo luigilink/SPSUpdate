@@ -42,7 +42,7 @@
     # --- Binaries (REQUIRED block; used by -Action ProductUpdate) ---------------------
     Binaries               = @{
         # ProductUpdate : allow the binary installation step.
-        # Possible values : $true | $false.   Default if omitted: $false
+        # Possible values : $true | $false.   Default if omitted: $true
         ProductUpdate    = $true
 
         # SetupFullPath : folder (local to each server) that holds the update binaries.
@@ -60,7 +60,7 @@
 
         # ShutdownServices : stop Search/Timer/IIS services during install to speed it up
         # (they are restored to their prior state afterwards).
-        # Possible values : $true | $false.   Default if omitted: $false
+        # Possible values : $true | $false.   Default if omitted: $true
         ShutdownServices = $false
     }
 
@@ -73,7 +73,7 @@
     MountContentDatabase   = $false
 
     # UpgradeContentDatabase : run Upgrade-SPContentDatabase on databases that NeedsUpgrade.
-    # Possible values : $true | $false.   Default if omitted: $false
+    # Possible values : $true | $false.   Default if omitted: $true
     UpgradeContentDatabase = $true
 
     # --- Side-by-side patching (OPTIONAL block) --------------------------------------
