@@ -407,21 +407,29 @@ Exception: $_
 # 3. Execute Action parameter
 switch ($Action) {
     'ResetStatus' {
-        # Clear the status store campaign folder so a fresh patching round starts clean.
-        # Run this once at the start of a campaign before launching ProductUpdate on the
-        # servers and the master Default run.
+        # Clear the status store campaign folder so a fresh patching round starts clean,
+        # then create the folder and an empty "waiting" dashboard so it can be opened in a
+        # browser before the ProductUpdate runs and the master Default run begin.
         try {
             if ([string]::IsNullOrEmpty($statusCampaignPath)) {
                 Write-Warning -Message 'No status store campaign path resolved; nothing to reset.'
             }
-            elseif (Test-Path -Path $statusCampaignPath) {
-                Write-Output "Resetting patching status store campaign: $statusCampaignPath"
-                Get-ChildItem -Path $statusCampaignPath -File -ErrorAction SilentlyContinue |
-                    Remove-Item -Force -ErrorAction SilentlyContinue
-                Write-Output 'Status store campaign cleared.'
-            }
             else {
-                Write-Output "Status store campaign folder does not exist yet (nothing to reset): $statusCampaignPath"
+                if (Test-Path -Path $statusCampaignPath) {
+                    Write-Output "Resetting patching status store campaign: $statusCampaignPath"
+                    Get-ChildItem -Path $statusCampaignPath -File -ErrorAction SilentlyContinue |
+                        Remove-Item -Force -ErrorAction SilentlyContinue
+                    Write-Output 'Status store campaign cleared.'
+                }
+                else {
+                    Write-Output "Creating patching status store campaign: $statusCampaignPath"
+                    New-Item -Path $statusCampaignPath -ItemType Directory -Force | Out-Null
+                }
+                # Generate the empty dashboard now so it is ready to open before patching.
+                Write-SPSDashboard
+                if (-not [string]::IsNullOrEmpty($statusDashboardPath)) {
+                    Write-Output "Live dashboard ready (open it in a browser): $statusDashboardPath"
+                }
             }
         }
         catch {
