@@ -194,11 +194,40 @@ $SPSUpdateVersion = (Get-Module -Name 'SPSUpdate.Common').Version.ToString()
 $getDateFormatted = Get-Date -Format yyyy-MM-dd_H-mm
 $spsUpdateFileName = "$($Application)-$($Environment)_$($getDateFormatted)"
 $spsUpdateDBsFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.json"
+$spsUpdateDbReportFile = "$($Application)-$($Environment)-$($spFarmName)-ContentDBs.html"
 $currentUser = ([Security.Principal.WindowsIdentity]::GetCurrent()).Name
 $pathLogsFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Logs'
 $pathConfigFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Config'
+$pathResultsFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Results'
 $fullScriptPath = Join-Path -Path $PSScriptRoot -ChildPath 'SPSUpdate.ps1'
 $spsUpdateDBsPath = Join-Path -Path $pathConfigFolder -ChildPath $spsUpdateDBsFile
+$spsUpdateDbReportPath = Join-Path -Path $pathResultsFolder -ChildPath $spsUpdateDbReportFile
+
+# Local helper: (re)generate the ContentDatabase inventory HTML report from the JSON
+# inventory, into the Results folder. Never blocks the run on a report failure.
+function Write-SPSUpdateDbReport {
+    param(
+        [Parameter(Mandatory = $true)][System.String] $JsonPath,
+        [Parameter(Mandatory = $true)][System.String] $ReportPath
+    )
+    try {
+        if (-not (Test-Path -Path $JsonPath)) {
+            return
+        }
+        if (-not (Test-Path -Path $pathResultsFolder)) {
+            New-Item -ItemType Directory -Path $pathResultsFolder -Force | Out-Null
+        }
+        $null = Export-SPSUpdateDbReport -InputFile $JsonPath `
+            -OutputFile $ReportPath `
+            -EnvName $Environment `
+            -AppCode $Application `
+            -FarmName $spFarmName
+        Write-Output "ContentDatabase inventory report generated: $ReportPath"
+    }
+    catch {
+        Write-Warning -Message "Failed to generate ContentDatabase inventory report: $($_.Exception.Message)"
+    }
+}
 
 # Initialize logs
 if (-Not (Test-Path -Path $pathLogsFolder)) {
@@ -287,6 +316,8 @@ try {
             "Initialize ContentDatabase json file for SPFARM: $($spFarmName)"
             Initialize-SPSContentDbJsonFile -Path $spsUpdateDBsPath
             $jsonDbCfg = Get-Content $spsUpdateDBsPath | ConvertFrom-Json
+            # Refresh the HTML inventory report alongside the freshly generated JSON.
+            Write-SPSUpdateDbReport -JsonPath $spsUpdateDBsPath -ReportPath $spsUpdateDbReportPath
         }
     }
 }
@@ -316,6 +347,8 @@ switch ($Action) {
             Initialize-SPSContentDbJsonFile -Path $spsUpdateDBsPath
             if (Test-Path -Path $spsUpdateDBsPath) {
                 Write-Output "ContentDatabase json file generated successfully: $spsUpdateDBsPath"
+                # Generate the self-contained HTML inventory report.
+                Write-SPSUpdateDbReport -JsonPath $spsUpdateDBsPath -ReportPath $spsUpdateDbReportPath
             }
             else {
                 throw "ContentDatabase json file was not created: $spsUpdateDBsPath"
