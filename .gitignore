@@ -12,7 +12,9 @@ coverage.xml
 src/Config/*.psd1
 !src/Config/*.example.psd1
 
-# Runtime output kept out of source control (logs and generated ContentDB inventory)
+# Runtime output kept out of source control (logs, results and generated ContentDB inventory)
 src/Logs/
+src/Results/
 **/*-ContentDBs.json
 **/*-ContentDBs_*.json
+**/*-ContentDBs.html
