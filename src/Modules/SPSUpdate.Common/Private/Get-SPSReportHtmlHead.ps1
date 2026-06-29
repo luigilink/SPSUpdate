@@ -9,7 +9,11 @@
     (
         [Parameter(Mandatory = $true)]
         [System.String]
-        $Title
+        $Title,
+
+        [Parameter()]
+        [System.Int32]
+        $RefreshSeconds = 0
     )
 
     $css = @'
@@ -43,8 +47,22 @@ tbody tr:nth-child(even){background:var(--zebra)}
 .pager{display:flex;gap:8px;align-items:center;font-size:12px}
 .pager button{padding:4px 10px;border:1px solid var(--line);background:#fff;border-radius:4px;cursor:pointer}
 .pager button:disabled{opacity:.4;cursor:default}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff}
+.badge.Pending{background:#9aa4ad}
+.badge.Running{background:#1f6fb2}
+.badge.Done{background:#2e9b57}
+.badge.Failed{background:#c0392b}
+.badge.Warning{background:#c19c00;color:#222}
+.badge.Skipped{background:#cfd6dc;color:#333}
+.phase{margin-top:18px}
+.scope{border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:8px 0;background:#fff}
+.scope-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--brand-dark)}
+.scope-detail{color:var(--muted);font-size:11px;margin-top:2px}
+.items{margin-top:6px}
+.live{color:#2e9b57;font-size:11px}
 .footer{color:var(--muted);font-size:11px;margin-top:24px;border-top:1px solid var(--line);padding-top:8px}
 '@
 
-    return "<!DOCTYPE html><html lang=`"en`"><head><meta charset=`"utf-8`"><meta name=`"viewport`" content=`"width=device-width, initial-scale=1`"><title>$Title</title><style>$css</style></head><body>"
+    $refreshTag = if ($RefreshSeconds -gt 0) { "<meta http-equiv=`"refresh`" content=`"$RefreshSeconds`">" } else { '' }
+    return "<!DOCTYPE html><html lang=`"en`"><head><meta charset=`"utf-8`"><meta name=`"viewport`" content=`"width=device-width, initial-scale=1`">$refreshTag<title>$Title</title><style>$css</style></head><body>"
 }

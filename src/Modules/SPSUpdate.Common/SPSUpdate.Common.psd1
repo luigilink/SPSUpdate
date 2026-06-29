@@ -14,6 +14,7 @@
         'Add-SPSUpdateEvent'
         'Copy-SPSSideBySideFilesRemote'
         'Export-SPSUpdateDbReport'
+        'Export-SPSUpdateProgressReport'
         'Get-SPSInstalledProductVersion'
         'Get-SPSSecret'
         'Get-SPSServersPatchStatus'
