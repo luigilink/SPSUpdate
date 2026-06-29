@@ -39,6 +39,14 @@
     # Possible values : any key present in secrets.psd1, e.g. 'PROD-ADM'.
     CredentialKey          = 'PROD-ADM'
 
+    # StatusStorePath : OPTIONAL UNC share where every server writes its patching
+    # progress so the live HTML dashboard can be assembled (near real-time tracking,
+    # v4.2.0+). It must be writable by the InstallAccount from every farm server.
+    # Leave empty/omit to fall back to the local Results\status folder (in that case
+    # ProductUpdate runs on other servers are not captured in the master dashboard).
+    # Possible values : '' or a UNC path, e.g. '\\fileserver\spsupdate-status'.
+    StatusStorePath        = '\\fileserver\spsupdate-status'
+
     # --- Binaries (REQUIRED block; used by -Action ProductUpdate) ---------------------
     Binaries               = @{
         # ProductUpdate : allow the binary installation step.

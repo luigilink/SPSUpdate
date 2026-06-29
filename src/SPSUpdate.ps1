@@ -172,6 +172,11 @@ function Get-SPSUpdateConfiguration {
         $config.SideBySideToken.BuildVersion = ''
     }
 
+    # StatusStorePath is optional; empty string means "use the local Results\status folder".
+    if (-not $config.ContainsKey('StatusStorePath') -or $null -eq $config.StatusStorePath) {
+        $config.StatusStorePath = ''
+    }
+
     return $config
 }
 
