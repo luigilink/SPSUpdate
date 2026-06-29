@@ -1,4 +1,5 @@
 ﻿function Get-SPSInstalledProductVersion {
+    [CmdletBinding()]
     [OutputType([System.Diagnostics.FileVersionInfo])]
     param ()
 

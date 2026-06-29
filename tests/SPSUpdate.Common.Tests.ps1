@@ -179,10 +179,10 @@ Describe 'Public function contracts' {
     }
 
     It 'Get-SPSInstalledProductVersion returns null off a SharePoint server' -Skip:($IsWindows -and (Test-Path 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions')) {
-        # Off a SharePoint server the function writes a non-terminating error and returns
-        # nothing; redirect the error stream so the assertion (null result) is what is tested.
-        $result = Get-SPSInstalledProductVersion 2>$null
-        $result | Should -BeNullOrEmpty
+        # Off a SharePoint server the function surfaces a non-terminating error and returns
+        # nothing; -ErrorAction SilentlyContinue suppresses it so the assertion (null result)
+        # is what is tested, deterministically on every OS.
+        Get-SPSInstalledProductVersion -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
     }
 }
 
