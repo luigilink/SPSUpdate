@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Windows PowerShell 5.1 needs a BOM to read non-ASCII correctly, and CRLF is the
+# native line ending on the target SharePoint servers.
+[*.{ps1,psm1,psd1}]
+charset = utf-8-bom
+end_of_line = crlf
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
