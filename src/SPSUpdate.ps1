@@ -268,9 +268,12 @@ Exception: $_
     Add-SPSUpdateEvent -Message $catchMessage -Source 'Get-SPSInstalledProductVersion' -EntryType 'Error'
 }
 
-# 2. Initialize or read ContentDatabase json file if UpgradeContentDatabase or MountContentDatabase equal to true
+# 2. For the Default action only (full run on the master + each -Sequence sub-run),
+# read or prime the ContentDatabase inventory JSON used by the mount/upgrade sequences.
+# ProductUpdate/Install/Uninstall never touch the inventory; InitContentDB regenerates it
+# in its own action block below.
 try {
-    if ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) {
+    if ($Action -eq 'Default' -and ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)) {
         if (-Not (Test-Path -Path $pathConfigFolder)) {
             # If the path does not exist, create the directory
             New-Item -ItemType Directory -Path $pathConfigFolder | Out-Null
