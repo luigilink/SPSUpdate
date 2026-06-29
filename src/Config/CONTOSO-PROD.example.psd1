@@ -69,7 +69,7 @@
         # ShutdownServices : stop Search/Timer/IIS services during install to speed it up
         # (they are restored to their prior state afterwards).
         # Possible values : $true | $false.   Default if omitted: $true
-        ShutdownServices = $false
+        ShutdownServices = $true
     }
 
     # --- Content database handling (OPTIONAL) ----------------------------------------
