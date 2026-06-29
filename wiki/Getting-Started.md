@@ -2,52 +2,56 @@
 
 ## Prerequisites
 
-- PowerShell 5.0 or later
-- CredSSP configured
-- Administrative privileges on the SharePoint Server
-- StoredCredential configured (if using `Install`)
+- PowerShell 5.1 or later (no DSC module required)
+- CredSSP configured (used for remoting to the other farm servers)
+- Administrative privileges on each SharePoint Server
+- A service account (`InstallAccount`) whose credential is stored in `Config\secrets.psd1`
 - SharePoint update binaries copied to a local or accessible path (if using `ProductUpdate`)
 
 ## Configure CredSSP
 
 ### Option 1: Manually configure CredSSP
 
-You can manually configure CredSSP through the use of some PowerShell cmdlet's (and potentially group policy to configure the allowed delegate computers). Some basic instructions can be found at [https://technet.microsoft.com/en-us/magazine/ff700227.aspx](https://technet.microsoft.com/en-us/magazine/ff700227.aspx).
+You can manually configure CredSSP through a few PowerShell cmdlets (and potentially group policy to configure the allowed delegate computers). Basic guidance is available in the Microsoft documentation.
 
 ### Option 2: Configure CredSSP with PowerShell commands
 
-If you prefer automation instead of manual setup, you can configure CredSSP directly with PowerShell commands on the server and client. Example:
+If you prefer automation instead of manual setup, configure CredSSP directly with PowerShell on the server and client. Example:
 
 ```powershell
 Enable-WSManCredSSP -Role Server -Force
 Enable-WSManCredSSP -Role Client -DelegateComputer '*.contoso.com' -Force
 ```
 
-In the above example, the delegate computer value can be a wildcard name such as `*.contoso.com`, or you can specify one or more explicit SharePoint servers.
+In the above example the delegate computer value can be a wildcard such as `*.contoso.com`, or one or more explicit SharePoint servers.
 
 ## Installation
 
-1. [Download the latest release](https://github.com/luigilink/SPSUpdate/releases/latest) and unzip to a directory on each SharePoint Server.
-2. Prepare your JSON configuration file with the required Cumulative Updates and farm details.
-3. Add the script in task scheduler by running the following command:
+1. [Download the latest release](https://github.com/luigilink/SPSUpdate/releases/latest) and unzip to a directory on each SharePoint Server. The archive extracts straight to `SPSUpdate.ps1`, `Config\` and `Modules\` (no `src\` wrapper).
+2. Copy `Config\CONTOSO-PROD.example.psd1` to a real config (for example `CONTOSO-PROD-CONTENT.psd1`) and edit the values for your farm. See [Configuration](./Configuration).
+3. Register the scheduled tasks by running the following command **as the service account** that will run them:
 
 ```powershell
-.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action Install -InstallAccount (Get-Credential)
+.\SPSUpdate.ps1 -ConfigFile 'CONTOSO-PROD-CONTENT.psd1' -Action Install -InstallAccount (Get-Credential)
 ```
 
-1. Install Cumulative Update binaries on each server by running the following command (or install manually):
+4. Install the cumulative update binaries on each server (or install them manually):
 
 ```powershell
-.\SPSUpdate.ps1 -ConfigFile 'contoso-PROD-CONTENT.json' -Action ProductUpdate
+.\SPSUpdate.ps1 -ConfigFile 'CONTOSO-PROD-CONTENT.psd1' -Action ProductUpdate
 ```
 
-`ProductUpdate` runs the SharePoint installer directly and does not require any DSC module.
+`ProductUpdate` runs the SharePoint installer directly, locally, and does not require the `InstallAccount` parameter.
 
 > [!IMPORTANT]
-> Configure the StoredCredential parameter in JSON before running the script in installation mode.
-> Run the Install mode with the same account than you used the in InstallAccount parameter
+> Run `-Action Install` **as the same account** you pass to `-InstallAccount`. The credential is stored as a DPAPI-encrypted SecureString in `Config\secrets.psd1`, which can only be decrypted by that account on that machine.
 
-`ProductUpdate` runs locally and does not require the `InstallAccount` parameter.
+## The credential store (DPAPI)
+
+SPSUpdate no longer depends on the Windows Credential Manager module. The `InstallAccount`
+credential is encrypted with `ConvertFrom-SecureString` (DPAPI) and stored under the
+`CredentialKey` entry of `Config\secrets.psd1`. `-Action Install` writes it for you;
+`-Action Uninstall` removes it. See [Configuration](./Configuration) for the file format.
 
 ## Next Step
 
