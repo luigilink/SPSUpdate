@@ -22,6 +22,8 @@
         [System.String]$Name
         [System.String]$Server
         [System.String]$WebAppUrl
+        [System.Int64]$SizeInBytes
+        [System.Double]$SizeInMB
     }
 
     #Get all content databases
@@ -52,9 +54,11 @@
                 }
             }
             [void]$sequenceLists[$minIndex].Add([SPDbContent]@{
-                    Name      = $spDatabase.Name;
-                    Server    = $spDatabase.Server;
-                    WebAppUrl = $spDatabase.WebApplication.Url;
+                    Name        = $spDatabase.Name;
+                    Server      = $spDatabase.Server;
+                    WebAppUrl   = $spDatabase.WebApplication.Url;
+                    SizeInBytes = [System.Int64]$spDatabase.DiskSizeRequired;
+                    SizeInMB    = [System.Math]::Round($spDatabase.DiskSizeRequired / 1MB, 0);
                 })
             $sequenceLoad[$minIndex] += $spDatabase.DiskSizeRequired
         }
