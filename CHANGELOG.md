@@ -3,6 +3,23 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-06-29
+
+### Added
+
+- New public function `Export-SPSUpdateDbReport` that renders the ContentDatabase inventory (`<App>-<Env>-<Farm>-ContentDBs.json`) as a self-contained, offline HTML report: summary cards (total databases, total size, balance spread), the per-sequence LPT distribution (count / size / percentage bars), and a sortable, filterable table of every database. Inventories generated before v4.1.0 (no size) still render and fall back to distributing by database count.
+- `SPSUpdate.ps1` now writes the HTML report under a new `Results\` folder whenever the inventory is (re)generated (the `InitContentDB` action and the Default-mode prime). Report failures warn but never block the run.
+- Private report helpers: `ConvertTo-SPSHtmlEncoded`, `Get-SPSReportCardHtml`, `Get-SPSReportHtmlHead`, `Get-SPSReportDistributionHtml`, `Get-SPSReportHtmlScript`.
+
+### Changed
+
+- `Initialize-SPSContentDbJsonFile` now persists `SizeInBytes` and `SizeInMB` for each database in the inventory JSON. This is backward compatible: the mount/upgrade flow still reads only `Name`, `WebAppUrl` and `Server`.
+- Bumped the module manifest to `4.1.0` and exported `Export-SPSUpdateDbReport`.
+
+### Tests
+
+- Added `Export-SPSUpdateDbReport.Tests.ps1` covering the self-contained HTML output, total size and distribution rendering, JSON-payload markup neutralization, the legacy no-size inventory path, reading from a JSON file, and the missing-file error.
+
 ## [4.0.0] - 2026-06-29
 
 ### Added

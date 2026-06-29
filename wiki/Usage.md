@@ -66,6 +66,35 @@ is typically used on the source farm before a farm upgrade (for example SharePoi
 2019 → Subscription Edition) so the inventory can be copied to the target farm and consumed
 by the `MountContentDatabase` flow.
 
+It also writes a self-contained HTML report of the inventory under `Results\` (see below).
+
+## ContentDatabase inventory report
+
+Whenever the inventory JSON is (re)generated — by `-Action InitContentDB`, or by the
+Default master run when it first primes the inventory — SPSUpdate also writes a
+self-contained HTML report next to the `Logs\` and `Config\` folders:
+
+```
+Results\<ApplicationName>-<ConfigurationName>-<FarmName>-ContentDBs.html
+```
+
+The report is dependency-free (no internet required) and shows:
+
+- summary cards: total content databases, total size (MB), and the balance spread across the four sequences;
+- the per-sequence distribution (count / size / percentage) reflecting the Longest-Processing-Time-First balancing;
+- a sortable, filterable table of every database with its sequence, server, web application and size.
+
+Inventories generated before v4.1.0 have no size information; the report still renders and
+falls back to distributing by database count. You can also generate the report on demand
+from an existing inventory with the public function:
+
+```powershell
+Import-Module .\Modules\SPSUpdate.Common\SPSUpdate.Common.psd1
+Export-SPSUpdateDbReport -InputFile '.\Config\contoso-PROD-CONTENT-ContentDBs.json' `
+    -OutputFile '.\Results\contoso-PROD-CONTENT-ContentDBs.html' `
+    -EnvName 'PROD' -AppCode 'contoso' -FarmName 'CONTENT'
+```
+
 ## How a full run works (`Default`)
 
 1. Reads the `InstallAccount` credential from `secrets.psd1` (DPAPI).
@@ -80,8 +109,9 @@ by the `MountContentDatabase` flow.
 ## Logging
 
 Each run starts a transcript under `Logs\` (the file name encodes the application,
-environment and — when relevant — the sequence or action). Lifecycle and error events are
-also written to the dedicated **`SPSUpdate` Windows Event Log** via `Add-SPSUpdateEvent`.
+environment and — when relevant — the sequence or action). The ContentDatabase inventory
+HTML report is written under `Results\`. Lifecycle and error events are also written to the
+dedicated **`SPSUpdate` Windows Event Log** via `Add-SPSUpdateEvent`.
 
 ## Error handling
 
