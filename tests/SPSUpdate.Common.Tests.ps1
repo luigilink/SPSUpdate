@@ -45,6 +45,7 @@ Describe 'SPSUpdate.Common module' {
             'Add-SPSScheduledTask'
             'Add-SPSUpdateEvent'
             'Copy-SPSSideBySideFilesRemote'
+            'Export-SPSUpdateDbReport'
             'Get-SPSInstalledProductVersion'
             'Get-SPSSecret'
             'Get-SPSServersPatchStatus'
@@ -65,7 +66,9 @@ Describe 'SPSUpdate.Common module' {
     }
 
     It 'does not export the private helpers' {
-        foreach ($name in @('Invoke-SPSCommand', 'Clear-ComObject', 'Get-SPSLocalVersionInfo', 'Get-SPSConfigRoot')) {
+        foreach ($name in @('Invoke-SPSCommand', 'Clear-ComObject', 'Get-SPSLocalVersionInfo', 'Get-SPSConfigRoot',
+                'ConvertTo-SPSHtmlEncoded', 'Get-SPSReportCardHtml', 'Get-SPSReportHtmlHead',
+                'Get-SPSReportDistributionHtml', 'Get-SPSReportHtmlScript')) {
             Get-Command -Name $name -Module SPSUpdate.Common -CommandType Function -ErrorAction SilentlyContinue |
                 Should -BeNullOrEmpty
         }
