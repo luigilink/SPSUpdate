@@ -1,4 +1,8 @@
-# This is the SPSUpdate CI Release workflow to create release from tag push
+# This is the SPSUpdate CI Release workflow to create a release from a tag push.
+# Triggered by pushing a v* tag (e.g. v4.0.0). It packages the *contents* of the
+# src/ folder into a ZIP (so the archive extracts straight to Config/, Modules/ and
+# SPSUpdate.ps1, with no src/ wrapper) and publishes a GitHub Release using
+# RELEASE-NOTES.md as the body.
 
 name: SPSUpdate CI Release
 
@@ -7,6 +11,9 @@ on:
     # Sequence of patterns matched against refs/tags
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -17,10 +24,10 @@ jobs:
         id: checkout_code
         uses: actions/checkout@v4
       # Create a ZIP file with project name and tag version
-      - name: Create ZIP file of scripts
+      - name: Create ZIP file of src contents
         run: |
           zip_name="SPSUpdate-${{ github.ref_name }}.zip"
-          zip -r $zip_name scripts/
+          ( cd src && zip -r "../$zip_name" . )
         shell: bash
       # Create Release with tag version
       - name: Create GitHub Release
