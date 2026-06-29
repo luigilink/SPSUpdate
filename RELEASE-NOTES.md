@@ -14,6 +14,7 @@ upgrading an existing deployment.
 - Tolerant configuration loader: optional keys fall back to safe defaults (`Binaries.ProductUpdate`, `Binaries.ShutdownServices` and `UpgradeContentDatabase` default to `$true`; `MountContentDatabase` and `SideBySideToken.Enable` default to `$false`).
 - Repository scaffolding aligned with the other SPS* projects: `.editorconfig`, `.gitattributes` (UTF-8 BOM + CRLF for PowerShell files), `PSScriptAnalyzerSettings.psd1`, and an expanded `.gitignore`.
 - Wiki: new `Release-Process` page and `_Sidebar.md` navigation.
+- Offline install guide (`src/SPSUpdate_README.md`) shipped inside the release ZIP, rewritten for the psd1 config, the DPAPI secret store and the `Modules\` layout (no DSC).
 
 ### Changed
 
