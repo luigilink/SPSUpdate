@@ -1,24 +1,39 @@
 # SPSUpdate - Release Notes
 
-## [4.1.0] - 2026-06-29
+## [4.2.0] - 2026-06-29
 
-This release adds a self-contained HTML report for the ContentDatabase inventory, in the
-same spirit as the SPSUserSync reports. It builds on the v4.0.0 modernization and is fully
-backward compatible.
+This release adds a near real-time patching dashboard: while a cumulative update is rolled
+out across the farm, SPSUpdate records the progress of every phase into a shared status
+store and the master assembles a self-contained, auto-refreshing HTML dashboard.
 
 ### Added
 
-- New public function `Export-SPSUpdateDbReport` that renders the ContentDatabase inventory (`<App>-<Env>-<Farm>-ContentDBs.json`) as a self-contained, offline HTML report: summary cards (total databases, total size, balance spread), the per-sequence LPT distribution (count / size / percentage bars), and a sortable, filterable table of every database. Inventories generated before v4.1.0 (no size) still render and fall back to distributing by database count.
-- `SPSUpdate.ps1` now writes the HTML report under a new `Results\` folder whenever the inventory is (re)generated (the `InitContentDB` action and the Default-mode prime). Report failures warn but never block the run.
-- Private report helpers: `ConvertTo-SPSHtmlEncoded`, `Get-SPSReportCardHtml`, `Get-SPSReportHtmlHead`, `Get-SPSReportDistributionHtml`, `Get-SPSReportHtmlScript`.
+- Status store and dashboard functions: `Set-SPSUpdateStatus` / `Get-SPSUpdateStatus`
+  (atomic per-scope JSON store, each writer owns its file), `Get-SPSStatusCampaignPath`
+  (resolves `<root>\<App>-<Env>-<Farm>`), and `Export-SPSUpdateProgressReport` (renders a
+  self-contained HTML dashboard with overall state, per-phase sections, colored state
+  badges, per-item exit codes and per-sequence percentage; meta-refresh while running).
+- New optional `StatusStorePath` config key (UNC share) with a local `Results\status`
+  fallback.
+- New `-Action ResetStatus` to clear a campaign before a fresh patching round.
+- `SPSUpdate.ps1` is instrumented end-to-end: ProductUpdate per server (per-setup-file
+  items), the four mount/upgrade sequences (per-database items and a running percentage),
+  the Configuration Wizard per server (local and remote), and side-by-side. The master
+  regenerates the dashboard on every wait-loop iteration and writes a final completed
+  dashboard with auto-refresh off.
+- New `Test-SPSUpdateReadiness.ps1` pre-flight check (module, config, DPAPI secret,
+  elevation, status store write access, per-server CredSSP reachability).
+
+### How to use
+
+1. Set `StatusStorePath` to a UNC share writable by the InstallAccount from every server.
+2. `SPSUpdate.ps1 -ConfigFile '<farm>.psd1' -Action ResetStatus` to start a clean campaign.
+3. Open `<StatusStorePath>\<App>-<Env>-<Farm>\_dashboard.html` in a browser.
+4. Run `-Action ProductUpdate` on each server, then the default master run; watch the
+   dashboard update itself.
 
 ### Changed
 
-- `Initialize-SPSContentDbJsonFile` now persists `SizeInBytes` and `SizeInMB` for each database in the inventory JSON. This is backward compatible: the mount/upgrade flow still reads only `Name`, `WebAppUrl` and `Server`.
-- Bumped the module manifest to `4.1.0` and exported `Export-SPSUpdateDbReport`.
-
-### Notes
-
-- An inventory produced by v4.0.0 (without size) renders correctly; regenerate it with `-Action InitContentDB` to get the size columns and size-based balancing in the report.
+- Bumped the module manifest to `4.2.0` and exported the four new functions.
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)

@@ -127,6 +127,22 @@ by the side-by-side token. Zero downtime patching is a method of patching and up
 developed in SharePoint in Microsoft 365. For more details see
 [SharePoint Server zero downtime patching steps](https://learn.microsoft.com/en-us/sharepoint/upgrade-and-update/sharepoint-server-2016-zero-downtime-patching-steps).
 
+## StatusStorePath (live dashboard)
+
+`StatusStorePath` is an OPTIONAL UNC share where every farm server writes its patching
+progress so the master can assemble the near-real-time HTML dashboard. It must be writable
+by the InstallAccount from every server.
+
+```powershell
+StatusStorePath = '\\fileserver\spsupdate-status'
+```
+
+Leave it empty (or omit it) to fall back to a local `Results\status` folder; in that case
+ProductUpdate runs launched on the other servers are not captured centrally. The status
+files of one campaign live under `<StatusStorePath>\<App>-<Env>-<Farm>\`, with the
+dashboard written there as `_dashboard.html`. See the
+[Usage](./Usage) page for the campaign workflow and the `ResetStatus` action.
+
 ## Next Step
 
 For the next steps, go to the [Usage](./Usage) page.

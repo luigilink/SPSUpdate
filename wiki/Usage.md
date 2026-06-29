@@ -122,6 +122,71 @@ dedicated **`SPSUpdate` Windows Event Log** via `Add-SPSUpdateEvent`.
 
 - Test the script in a non-production environment before deploying it widely.
 
+## Near real-time patching dashboard
+
+When a status store is configured, SPSUpdate records the progress of every phase
+(ProductUpdate per server, the four mount/upgrade sequences, the Configuration Wizard
+per server, and side-by-side) into a shared location, and the master assembles a live
+HTML dashboard you can open in a browser while patching runs.
+
+### Configure the status store
+
+Set `StatusStorePath` in the environment config to a UNC share writable by the
+InstallAccount from every farm server:
+
+```powershell
+StatusStorePath = '\\fileserver\spsupdate-status'
+```
+
+If left empty, SPSUpdate falls back to a local `Results\status` folder. In that case the
+master still shows the mount/upgrade/wizard phases, but ProductUpdate runs launched on the
+other servers are not captured centrally (they would each write to their own local folder).
+
+The status files of one patching campaign live under
+`<StatusStorePath>\<App>-<Env>-<Farm>\`, and the dashboard is written there as
+`_dashboard.html`.
+
+### Run a patched campaign with the dashboard
+
+1. **Reset** the campaign once (clears any previous run):
+
+   ```powershell
+   .\SPSUpdate.ps1 -ConfigFile 'CONTOSO-PROD-CONTENT.psd1' -Action ResetStatus
+   ```
+
+2. Open `\<StatusStorePath>\<App>-<Env>-<Farm>\_dashboard.html` in a browser. It
+   auto-refreshes every 15 seconds while the campaign is in progress.
+
+3. Install the binaries on **each** server (each writes its ProductUpdate progress to the
+   share):
+
+   ```powershell
+   .\SPSUpdate.ps1 -ConfigFile 'CONTOSO-PROD-CONTENT.psd1' -Action ProductUpdate
+   ```
+
+4. Run the master upgrade on the master server. It regenerates the dashboard as the four
+   sequences, the Configuration Wizard and the side-by-side step progress, and turns the
+   auto-refresh off with a final state when finished:
+
+   ```powershell
+   .\SPSUpdate.ps1 -ConfigFile 'CONTOSO-PROD-CONTENT.psd1'
+   ```
+
+The dashboard shows the overall state, per-server / per-sequence progress, per-database and
+per-binary item states with exit codes, and a completion percentage for each sequence.
+
+## Pre-flight readiness check
+
+`Test-SPSUpdateReadiness.ps1` validates the environment before a run (read-only). It checks
+the module import, the config keys, the DPAPI secret, elevation, the status store
+reachability and write access, and the per-server WinRM/CredSSP reachability:
+
+```powershell
+.\Test-SPSUpdateReadiness.ps1 -ConfigFile 'Config\CONTOSO-PROD-CONTENT.psd1'
+```
+
+It exits non-zero when any check fails, so it can gate an automated rollout.
+
 ## Support
 
 For issues or questions, open an [issue](https://github.com/luigilink/SPSUpdate/issues) or

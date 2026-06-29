@@ -3,6 +3,37 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-06-29
+
+### Added
+
+- Near real-time patching dashboard. New public functions `Set-SPSUpdateStatus` /
+  `Get-SPSUpdateStatus` persist and read a shared, per-scope JSON status store
+  (atomic writes, each writer owns its file), `Get-SPSStatusCampaignPath` resolves
+  the campaign folder, and `Export-SPSUpdateProgressReport` renders a self-contained,
+  auto-refreshing HTML dashboard (overall state, per-phase sections, colored state
+  badges, per-item exit codes and per-sequence percentage).
+- New optional `StatusStorePath` config key (UNC share) for the status store, with a
+  local `Results\status` fallback.
+- New `-Action ResetStatus` to clear a campaign before a fresh patching round.
+- `SPSUpdate.ps1` is instrumented to feed the store and regenerate the dashboard:
+  ProductUpdate per server (per-setup-file items), the four mount/upgrade sequences
+  (per-database items and a running percentage), the Configuration Wizard per server
+  (local and remote), and the side-by-side step. The master regenerates the dashboard
+  on every wait-loop iteration and writes a final completed dashboard.
+- New `Test-SPSUpdateReadiness.ps1` pre-flight check (module, config, DPAPI secret,
+  elevation, status store write access, per-server CredSSP reachability).
+
+### Changed
+
+- Bumped the module manifest to `4.2.0` and exported the four new functions.
+- Extended the shared HTML head helper with an optional meta-refresh and state-badge styles.
+
+### Tests
+
+- Added cross-platform Pester suites for the status store round-trip and resilience, and
+  for the dashboard (running / failed / completed / empty / HTML-encoding).
+
 ## [4.1.0] - 2026-06-29
 
 ### Added

@@ -161,6 +161,27 @@ and configures the side-by-side token when enabled:
 E:\SCRIPT\SPSUpdate.ps1 -ConfigFile 'E:\SCRIPT\Config\CONTOSO-PROD-CONTENT.psd1'
 ```
 
+## 📡 Near real-time dashboard (optional)
+
+Set `StatusStorePath` in the config to a UNC share writable by the InstallAccount from
+every server to get a live HTML dashboard of the patching campaign:
+
+1. `SPSUpdate.ps1 -ConfigFile '<farm>.psd1' -Action ResetStatus` (clears the campaign).
+2. Open `<StatusStorePath>\<App>-<Env>-<Farm>\_dashboard.html` in a browser (auto-refresh).
+3. Run `-Action ProductUpdate` on each server, then the default master run.
+
+If `StatusStorePath` is empty, the dashboard falls back to the local `Results\status`
+folder (ProductUpdate on other servers is then not captured centrally).
+
+## ✅ Pre-flight readiness check (optional)
+
+```powershell
+E:\SCRIPT\Test-SPSUpdateReadiness.ps1 -ConfigFile 'E:\SCRIPT\Config\CONTOSO-PROD-CONTENT.psd1'
+```
+
+Read-only validation of the module, config, DPAPI secret, elevation, status store write
+access and CredSSP reachability. Exits non-zero on any failure.
+
 ## 🔄 Uninstalling
 
 To remove the scheduled tasks and the stored secret:
