@@ -1,1 +1,18 @@
 **/.DS_Store
+
+# Test / analysis artifacts
+test-results.xml
+testResults.xml
+coverage.xml
+
+# Local secrets (DPAPI credential store) -- NEVER commit real secrets
+**/secrets.psd1
+
+# Real environment configs live in src/Config; only *.example.psd1 templates are tracked
+src/Config/*.psd1
+!src/Config/*.example.psd1
+
+# Runtime output kept out of source control (logs and generated ContentDB inventory)
+src/Logs/
+**/*-ContentDBs.json
+**/*-ContentDBs_*.json

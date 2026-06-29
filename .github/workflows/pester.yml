@@ -1,4 +1,4 @@
-# This is the SPSUpdate CI Pester workflow to run tests on pull requests
+# SPSUpdate CI Pester workflow to run tests and code analysis on pull requests.
 
 name: SPSUpdate CI Pester Tests
 
@@ -7,14 +7,23 @@ on:
     branches:
       - main
     paths:
-      - 'scripts/**'
+      - 'src/**'
       - 'tests/**'
+      - 'PSScriptAnalyzerSettings.psd1'
+
+# The "Publish Test Results" step creates a check run, which requires write
+# access to checks. The default GITHUB_TOKEN is read-only on repositories
+# created with the modern default, so grant the minimum needed here.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   test:
     name: Run Pester Tests
     runs-on: windows-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,7 +43,7 @@ jobs:
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputPath = './test-results.xml'
           $config.Output.Verbosity = 'Detailed'
-          
+
           Invoke-Pester -Configuration $config
 
       - name: Upload test results
@@ -47,6 +56,7 @@ jobs:
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/composite@v2
         if: always()
+        continue-on-error: true
         with:
           files: |
             test-results.xml
@@ -55,10 +65,10 @@ jobs:
   code-quality:
     name: Code Quality Check
     runs-on: windows-latest
-    
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install PSScriptAnalyzer
         shell: pwsh
@@ -68,18 +78,16 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
-          # Exclude credentialmanager folder (third-party dependency)
-          $scriptFiles = Get-ChildItem -Path ./scripts -Include '*.ps1', '*.psm1' -Recurse |
-            Where-Object { $_.FullName -notlike '*credentialmanager*' }
-          
-          $results = $scriptFiles | ForEach-Object { 
-            Invoke-ScriptAnalyzer -Path $_.FullName -Severity Error,Warning 
-          }
-          
+          # Analyze our own code only: the entry script and the SPSUpdate.Common module.
+          $results = @()
+          $results += Invoke-ScriptAnalyzer -Path ./src/SPSUpdate.ps1 -Settings ./PSScriptAnalyzerSettings.psd1
+          $results += Invoke-ScriptAnalyzer -Path ./src/Modules/SPSUpdate.Common -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+
           if ($results) {
             $results | Format-Table -AutoSize
             Write-Error "PSScriptAnalyzer found issues"
             exit 1
-          } else {
+          }
+          else {
             Write-Host "No issues found by PSScriptAnalyzer"
           }
