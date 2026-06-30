@@ -63,7 +63,7 @@ param
     $ConfigFile, # Path to the configuration file
 
     [Parameter(Position = 1)]
-    [validateSet('Install', 'Uninstall', 'Default', 'ProductUpdate', 'InitContentDB', IgnoreCase = $true)]
+    [validateSet('Install', 'Uninstall', 'Default', 'ProductUpdate', 'InitContentDB', 'ResetStatus', IgnoreCase = $true)]
     [System.String]
     $Action = 'Default',
 
@@ -172,6 +172,11 @@ function Get-SPSUpdateConfiguration {
         $config.SideBySideToken.BuildVersion = ''
     }
 
+    # StatusStorePath is optional; empty string means "use the local Results\status folder".
+    if (-not $config.ContainsKey('StatusStorePath') -or $null -eq $config.StatusStorePath) {
+        $config.StatusStorePath = ''
+    }
+
     return $config
 }
 
@@ -202,6 +207,74 @@ $pathResultsFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Results'
 $fullScriptPath = Join-Path -Path $PSScriptRoot -ChildPath 'SPSUpdate.ps1'
 $spsUpdateDBsPath = Join-Path -Path $pathConfigFolder -ChildPath $spsUpdateDBsFile
 $spsUpdateDbReportPath = Join-Path -Path $pathResultsFolder -ChildPath $spsUpdateDbReportFile
+
+# Resolve the patching status store campaign folder (UNC share when configured, local
+# Results\status fallback otherwise). Shared by every server/task to feed the live
+# dashboard. Identity is <App>-<Env>-<Farm> so same-campaign actions land together.
+$thisServer = $env:COMPUTERNAME
+$statusCampaignPath = $null
+try {
+    $statusCampaignPath = Get-SPSStatusCampaignPath -StatusStorePath $envCfg.StatusStorePath `
+        -ResultsFolder $pathResultsFolder `
+        -Application $Application `
+        -Environment $Environment `
+        -FarmName $spFarmName
+}
+catch {
+    Write-Warning -Message "Could not resolve the status store campaign path: $($_.Exception.Message)"
+}
+$statusDashboardPath = if ($null -ne $statusCampaignPath) { Join-Path -Path $statusCampaignPath -ChildPath '_dashboard.html' } else { $null }
+
+# Local helper: best-effort status write. Never blocks the run on a status failure.
+function Write-SPSStatus {
+    param(
+        [Parameter(Mandatory = $true)][System.String] $Scope,
+        [Parameter(Mandatory = $true)][ValidateSet('ProductUpdate', 'Mount', 'Upgrade', 'Sequence', 'Wizard', 'SideBySide')][System.String] $Phase,
+        [System.String] $Server = $thisServer,
+        [System.String] $State,
+        [System.String] $Detail,
+        [System.Nullable[int]] $Percent,
+        [System.String] $Item,
+        [System.String] $ItemState,
+        [System.String] $ItemDetail,
+        [System.Nullable[int]] $ExitCode
+    )
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
+    try {
+        $params = @{ CampaignPath = $statusCampaignPath; Scope = $Scope; Phase = $Phase; Server = $Server; Confirm = $false }
+        if ($PSBoundParameters.ContainsKey('State')) { $params.State = $State }
+        if ($PSBoundParameters.ContainsKey('Detail')) { $params.Detail = $Detail }
+        if ($PSBoundParameters.ContainsKey('Percent') -and $null -ne $Percent) { $params.Percent = $Percent }
+        if ($PSBoundParameters.ContainsKey('Item')) { $params.Item = $Item }
+        if ($PSBoundParameters.ContainsKey('ItemState')) { $params.ItemState = $ItemState }
+        if ($PSBoundParameters.ContainsKey('ItemDetail')) { $params.ItemDetail = $ItemDetail }
+        if ($PSBoundParameters.ContainsKey('ExitCode') -and $null -ne $ExitCode) { $params.ExitCode = $ExitCode }
+        $null = Set-SPSUpdateStatus @params
+    }
+    catch {
+        Write-Warning -Message "Failed to write patching status ($Scope): $($_.Exception.Message)"
+    }
+}
+
+# Local helper: (re)generate the live dashboard from the status store.
+function Write-SPSDashboard {
+    param([switch] $Completed)
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
+    try {
+        $params = @{
+            CampaignPath = $statusCampaignPath
+            OutputFile   = $statusDashboardPath
+            EnvName      = $Environment
+            AppCode      = $Application
+            FarmName     = $spFarmName
+        }
+        if ($Completed) { $params.Completed = $true }
+        $null = Export-SPSUpdateProgressReport @params
+    }
+    catch {
+        Write-Warning -Message "Failed to generate patching dashboard: $($_.Exception.Message)"
+    }
+}
 
 # Local helper: (re)generate the ContentDatabase inventory HTML report from the JSON
 # inventory, into the Results folder. Never blocks the run on a report failure.
@@ -333,6 +406,41 @@ Exception: $_
 
 # 3. Execute Action parameter
 switch ($Action) {
+    'ResetStatus' {
+        # Clear the status store campaign folder so a fresh patching round starts clean,
+        # then create the folder and an empty "waiting" dashboard so it can be opened in a
+        # browser before the ProductUpdate runs and the master Default run begin.
+        try {
+            if ([string]::IsNullOrEmpty($statusCampaignPath)) {
+                Write-Warning -Message 'No status store campaign path resolved; nothing to reset.'
+            }
+            else {
+                if (Test-Path -Path $statusCampaignPath) {
+                    Write-Output "Resetting patching status store campaign: $statusCampaignPath"
+                    Get-ChildItem -Path $statusCampaignPath -File -ErrorAction SilentlyContinue |
+                        Remove-Item -Force -ErrorAction SilentlyContinue
+                    Write-Output 'Status store campaign cleared.'
+                }
+                else {
+                    Write-Output "Creating patching status store campaign: $statusCampaignPath"
+                    New-Item -Path $statusCampaignPath -ItemType Directory -Force | Out-Null
+                }
+                # Generate the empty dashboard now so it is ready to open before patching.
+                Write-SPSDashboard
+                if (-not [string]::IsNullOrEmpty($statusDashboardPath)) {
+                    Write-Output "Live dashboard ready (open it in a browser): $statusDashboardPath"
+                }
+            }
+        }
+        catch {
+            $catchMessage = @"
+Failed to reset the status store campaign: $($statusCampaignPath)
+Exception: $_
+"@
+            Write-Error -Message $catchMessage
+            Add-SPSUpdateEvent -Message $catchMessage -Source 'Set-SPSUpdateStatus' -EntryType 'Error'
+        }
+    }
     'InitContentDB' {
         # (Re)generate the ContentDatabase inventory JSON file for the local farm.
         # Typically used on a source farm (for example SP2019) to prepare an upgrade
@@ -526,6 +634,8 @@ Exception: $_
     }
     'ProductUpdate' {
         # Run ProductUpdate
+        Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Running' -Detail "Installing $(@($envCfg.Binaries.SetupFileName).Count) update(s)"
+        Write-SPSDashboard
         try {
             foreach ($setupFile in $envCfg.Binaries.SetupFileName) {
                 $fullSetupFilePath = Join-Path -Path $envCfg.Binaries.SetupFullPath -ChildPath $setupFile
@@ -536,14 +646,32 @@ SharePoint Server: $($spTargetServer)
 Setup File Path: $($fullSetupFilePath)
 Shutdown Services: $($envCfg.Binaries.ShutdownServices)
 "@
+                Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Running' -Item $setupFile -ItemState 'Running' -ItemDetail 'installing'
+                Write-SPSDashboard
                 # NOTE: Pending reboot detection was removed because on production farms the
                 # Windows reboot markers (CBS, PendingFileRenameOperations, etc.) commonly
                 # remain set after several reboots, which caused the script to abort the
                 # ProductUpdate even when the system was actually in a healthy state.
                 # Unblock setup file if it is blocked
                 Unblock-File -Path $fullSetupFilePath -Verbose
-                Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices -Verbose
+                $puExitCode = Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices -Verbose
+                if ($null -eq $puExitCode) {
+                    # No install happened: already at or above the patch level.
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail 'already installed'
+                }
+                else {
+                    $puDetail = switch ([int]$puExitCode) {
+                        0 { 'installed' }
+                        17022 { 'installed - reboot required' }
+                        17025 { 'already installed' }
+                        default { "installed (exit $puExitCode)" }
+                    }
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail $puDetail -ExitCode ([int]$puExitCode)
+                }
+                Write-SPSDashboard
             }
+            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed'
+            Write-SPSDashboard
         }
         catch {
             # Handle errors during Run ProductUpdate
@@ -554,6 +682,8 @@ Exception: $_
 "@
             Write-Error -Message $catchMessage
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Failed' -Detail "$($_.Exception.Message)"
+            Write-SPSDashboard
             if ($script:TranscriptStarted) {
                 Stop-Transcript | Out-Null
                 $script:TranscriptStarted = $false
@@ -563,6 +693,8 @@ Exception: $_
     }
     Default {
         if ($PSBoundParameters.ContainsKey('Sequence')) {
+            $seqScope = "Sequence$Sequence"
+            $seqPhase = if ($envCfg.MountContentDatabase) { 'Mount' } else { 'Upgrade' }
             try {
                 Write-Output "Update Script in progress | Sequence $Sequence  - Please Wait ..."
                 switch ($Sequence) {
@@ -571,7 +703,11 @@ Exception: $_
                     3 { $dbs = $jsonDbCfg.SPContentDatabase3 }
                     4 { $dbs = $jsonDbCfg.SPContentDatabase4 }
                 }
-                foreach ($db in $dbs) {
+                $dbList = @($dbs)
+                $dbTotal = $dbList.Count
+                $dbDone = 0
+                Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Running' -Percent 0 -Detail "$dbTotal database(s)"
+                foreach ($db in $dbList) {
                     # Mount SPContentDatabase (typically used to attach databases coming from a
                     # previous farm version, for example SP2019 -> Subscription Edition migration).
                     # Mounts run inside each Sequence scheduled task, so the 4 sequences process
@@ -579,11 +715,14 @@ Exception: $_
                     # the ContentDatabase inventory JSON file produced by Initialize-SPSContentDbJsonFile.
                     # Mount and Upgrade are independent: a farm can be configured for Mount only,
                     # Upgrade only, or both (Mount then Upgrade for SP2019 -> SE migration).
+                    Write-SPSStatus -Scope $seqScope -Phase $seqPhase -Item "$($db.Name)" -ItemState 'Running' -ItemDetail 'processing'
+                    $dbFailed = $false
                     if ($envCfg.MountContentDatabase) {
                         try {
                             Mount-SPSContentDatabase -Name $db.Name -WebAppUrl $db.WebAppUrl -DatabaseServer $db.Server
                         }
                         catch {
+                            $dbFailed = $true
                             $catchMessage = @"
 Failed to Mount SPContentDatabase '$($db.Name)' on WebApplication '$($db.WebAppUrl)'
 Target SPFarm: $($spFarmName)
@@ -591,12 +730,19 @@ Exception: $_
 "@
                             Write-Error -Message $catchMessage
                             Add-SPSUpdateEvent -Message $catchMessage -Source 'Mount-SPSContentDatabase' -EntryType 'Error'
+                            Write-SPSStatus -Scope $seqScope -Phase $seqPhase -Item "$($db.Name)" -ItemState 'Failed' -ItemDetail "Mount failed: $($_.Exception.Message)"
                         }
                     }
-                    if ($envCfg.UpgradeContentDatabase) {
+                    if (-not $dbFailed -and $envCfg.UpgradeContentDatabase) {
                         Update-SPSContentDatabase -Name $db.Name
                     }
+                    if (-not $dbFailed) {
+                        $dbDone++
+                        $pct = if ($dbTotal -gt 0) { [int]([math]::Round($dbDone / $dbTotal * 100, 0)) } else { 100 }
+                        Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Running' -Percent $pct -Item "$($db.Name)" -ItemState 'Done' -ItemDetail 'processed'
+                    }
                 }
+                Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Done' -Percent 100 -Detail "$dbDone/$dbTotal processed"
             }
             catch {
                 # Handle errors during Update Script Sequence
@@ -607,6 +753,7 @@ Exception: $_
 "@
                 Write-Error -Message $catchMessage
                 Add-SPSUpdateEvent -Message $catchMessage -Source 'Update-SPSContentDatabase' -EntryType 'Error'
+                Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Failed' -Detail "$($_.Exception.Message)"
             }
         }
         else {
@@ -684,8 +831,21 @@ Exception: $_
                         Write-Output "Running Scheduled Task $taskName in $script:TaskPath Task Path"
                         $startResult = Start-SPSScheduledTask -Name $taskName -TaskPath $script:TaskPath -ErrorAction Stop
                         Write-Output "Start requested for $($startResult.Name) in $($startResult.TaskPath). Current state: $($startResult.State)"
-                        Write-Output 'Avoid conflicts with OWSTimer process - Pause between 60 to 90 seconds'
-                        Start-Sleep -Seconds (get-random (60..90))
+                        # Refresh the dashboard right after each start so a sequence that
+                        # already began writing its status shows up immediately.
+                        Write-SPSDashboard
+                        # Pause 60-90s between starts to avoid OWSTimer conflicts, but keep
+                        # the dashboard live by regenerating it every ~10s during the wait
+                        # (the started sequences write their per-database progress meanwhile).
+                        $pauseSeconds = (Get-Random -Minimum 60 -Maximum 91)
+                        Write-Output "Avoid conflicts with OWSTimer process - Pause $pauseSeconds seconds"
+                        $waited = 0
+                        while ($waited -lt $pauseSeconds) {
+                            $chunk = [System.Math]::Min(10, ($pauseSeconds - $waited))
+                            Start-Sleep -Seconds $chunk
+                            $waited += $chunk
+                            Write-SPSDashboard
+                        }
                     }
                     catch {
                         # Handle errors during Start scheduled Task for Upgrade SPContentDatabase in Parallel
@@ -726,6 +886,9 @@ Exception: $_
                             $allTasksFinished = $false
                         }
                     }
+                    # Refresh the live dashboard from the shared status store while the
+                    # parallel sequence tasks write their progress into it.
+                    Write-SPSDashboard
                     if (-not $allTasksFinished) {
                         Write-Output 'At least one task is still running. Waiting...'
                         Start-Sleep -Seconds 10
@@ -740,11 +903,18 @@ Exception: $_
                 Write-Output "Getting Patch Status on server: $($env:COMPUTERNAME)"
                 if ((Get-SPSServersPatchStatus -Server "$($env:COMPUTERNAME)") -eq 'NoActionRequired') {
                     Write-Output "No Action Required on server: $($env:COMPUTERNAME). Skipping Configuration Wizard."
+                    Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State 'Skipped' -Detail 'No action required'
                 }
                 else {
                     Write-Output "Action Required on server: $($env:COMPUTERNAME). Proceeding to run Configuration Wizard."
-                    Start-SPSConfigExe
+                    Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State 'Running' -Detail 'Running PSConfig'
+                    Write-SPSDashboard
+                    $wizResult = Start-SPSConfigExe
+                    $wizExit = @($wizResult) | Where-Object { $_ -is [int] } | Select-Object -Last 1
+                    $wizDetail = if ($null -ne $wizExit) { "PSConfig completed (exit $([int]$wizExit))" } else { 'PSConfig completed' }
+                    Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State 'Done' -Detail $wizDetail
                 }
+                Write-SPSDashboard
             }
             catch {
                 # Handle errors during Run SPConfigWizard on Master SharePoint Server
@@ -756,6 +926,8 @@ Exception: $_
 "@
                 Write-Error -Message $catchMessage
                 Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSConfigExe' -EntryType 'Error'
+                Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State 'Failed' -Detail "$($_.Exception.Message)"
+                Write-SPSDashboard
             }
 
             # Run SPConfigWizard on other SharePoint Server
@@ -766,12 +938,19 @@ Exception: $_
                     Write-Output "Getting Patch Status on server: $($spServer.Name)"
                     if ((Get-SPSServersPatchStatus -Server "$($spServer.Name)") -eq 'NoActionRequired') {
                         Write-Output "No Action Required on server: $($spServer.Name). Skipping Configuration Wizard."
+                        Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Skipped' -Detail 'No action required'
                     }
                     else {
                         Write-Output "Action Required on server: $($spServer.Name). Proceeding to run Configuration Wizard."
                         $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
-                        Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
+                        Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Running' -Detail 'Running PSConfig (remote)'
+                        Write-SPSDashboard
+                        $wizResultRemote = Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
+                        $wizExitRemote = @($wizResultRemote) | Where-Object { $_ -is [int] } | Select-Object -Last 1
+                        $wizDetailRemote = if ($null -ne $wizExitRemote) { "PSConfig completed (exit $([int]$wizExitRemote))" } else { 'PSConfig completed' }
+                        Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Done' -Detail $wizDetailRemote
                     }
+                    Write-SPSDashboard
                 }
                 catch {
                     # Handle errors during Run SPConfigWizard on remote SharePoint Server
@@ -783,6 +962,8 @@ Exception: $_
 "@
                     Write-Error -Message $catchMessage
                     Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSConfigExeRemote' -EntryType 'Error'
+                    Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Failed' -Detail "$($_.Exception.Message)"
+                    Write-SPSDashboard
                 }
             }
 
@@ -790,7 +971,11 @@ Exception: $_
             if (-not([string]::IsNullOrEmpty($envCfg.SideBySideToken.BuildVersion))) {
                 try {
                     Write-Output "Configuring SharePoint SideBySideToken on farm $($spFarmName)"
+                    Write-SPSStatus -Scope 'SideBySide' -Phase 'SideBySide' -Server $thisServer -State 'Running' -Detail "Token $($envCfg.SideBySideToken.BuildVersion)"
+                    Write-SPSDashboard
                     Set-SPSSideBySideToken -BuildVersion "$($envCfg.SideBySideToken.BuildVersion)" -EnableSideBySide $envCfg.SideBySideToken.Enable
+                    Write-SPSStatus -Scope 'SideBySide' -Phase 'SideBySide' -Server $thisServer -State 'Done' -Detail 'Token configured'
+                    Write-SPSDashboard
                 }
                 catch {
                     # Handle errors during Run Set-SPSSideBySideToken
@@ -801,6 +986,8 @@ Exception: $_
 "@
                     Write-Error -Message $catchMessage
                     Add-SPSUpdateEvent -Message $catchMessage -Source 'Set-SPSSideBySideToken' -EntryType 'Error'
+                    Write-SPSStatus -Scope 'SideBySide' -Phase 'SideBySide' -Server $thisServer -State 'Failed' -Detail "$($_.Exception.Message)"
+                    Write-SPSDashboard
                 }
             }
 
@@ -811,6 +998,7 @@ Exception: $_
                     try {
                         $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
                         Copy-SPSSideBySideFilesRemote -Server $spTargetServer -InstallAccount $credential
+                        Write-SPSStatus -Scope 'SideBySide' -Phase 'SideBySide' -Server "$($spServer.Name)" -State 'Done' -Detail 'Side-by-side files copied'
                     }
                     catch {
                         # Handle errors during Run Copy-SPSSideBySideFilesAllServers
@@ -822,9 +1010,13 @@ Exception: $_
 "@
                         Write-Error -Message $catchMessage
                         Add-SPSUpdateEvent -Message $catchMessage -Source 'Copy-SPSSideBySideFiles' -EntryType 'Error'
+                        Write-SPSStatus -Scope 'SideBySide' -Phase 'SideBySide' -Server "$($spServer.Name)" -State 'Failed' -Detail "$($_.Exception.Message)"
                     }
                 }
             }
+
+            # Final dashboard render: mark the campaign completed (auto-refresh off).
+            Write-SPSDashboard -Completed
         }
     }
 }

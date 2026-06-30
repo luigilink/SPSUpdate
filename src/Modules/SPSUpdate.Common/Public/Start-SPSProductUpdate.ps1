@@ -1,5 +1,6 @@
 ﻿function Start-SPSProductUpdate {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    [OutputType([System.Nullable[int]])]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -136,12 +137,14 @@ Error codes can be found at https://aka.ms/installerrorcodes
             Start-Process -FilePath "iisreset.exe" `
                 -ArgumentList "-start" `
                 -Wait `
-                -PassThru
+                -PassThru | Out-Null
             write-Verbose -Message "All services started. Installation process complete."
         }
+        return [int]$setupInstall.ExitCode
     }
     else {
         # Version of SharePoint is equal or greater than the patch version. Patch is installed.
         Write-Verbose -Message "The version of SharePoint installed is equal or higher than the update. No action needed."
+        return $null
     }
 }

@@ -37,7 +37,7 @@ Describe 'SPSUpdate.Common module' {
     }
 
     It 'manifest version is 4.0.0 or higher' {
-        (Test-ModuleManifest -Path $modulePath).Version | Should -BeGreaterOrEqual ([version]'4.0.0')
+        (Test-ModuleManifest -Path $modulePath).Version | Should -BeGreaterOrEqual ([version]'4.2.0')
     }
 
     It 'exports exactly the expected public functions' {
@@ -46,14 +46,18 @@ Describe 'SPSUpdate.Common module' {
             'Add-SPSUpdateEvent'
             'Copy-SPSSideBySideFilesRemote'
             'Export-SPSUpdateDbReport'
+            'Export-SPSUpdateProgressReport'
             'Get-SPSInstalledProductVersion'
             'Get-SPSSecret'
             'Get-SPSServersPatchStatus'
+            'Get-SPSStatusCampaignPath'
+            'Get-SPSUpdateStatus'
             'Initialize-SPSContentDbJsonFile'
             'Mount-SPSContentDatabase'
             'Remove-SPSScheduledTask'
             'Set-SPSSecret'
             'Set-SPSSideBySideToken'
+            'Set-SPSUpdateStatus'
             'Start-SPSConfigExe'
             'Start-SPSConfigExeRemote'
             'Start-SPSProductUpdate'
