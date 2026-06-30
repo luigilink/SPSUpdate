@@ -22,12 +22,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (local and remote), and the side-by-side step. The master regenerates the dashboard
   on every wait-loop iteration and writes a final completed dashboard.
 - New `Test-SPSUpdateReadiness.ps1` pre-flight check (module, config, DPAPI secret,
-  elevation, status store write access, per-server CredSSP reachability).
+  elevation, status store write access, per-server CredSSP reachability). The status store
+  check probes write access **both as the current user and as the InstallAccount** (the
+  account that runs the sequence tasks), since the upgrade sequences only publish their
+  status — and therefore only appear on the dashboard — when the service account can write
+  to the share.
+- `-Action ResetStatus` now creates the campaign folder and an empty "waiting" dashboard so
+  it can be opened in a browser before patching begins.
+- The master keeps the dashboard live during the staggered sequence start (regenerated after
+  each task start and every ~10s during the 60-90s OWSTimer pause), not only once the wait
+  loop is reached.
 
 ### Changed
 
 - Bumped the module manifest to `4.2.0` and exported the four new functions.
 - Extended the shared HTML head helper with an optional meta-refresh and state-badge styles.
+- Documented that the InstallAccount needs **Modify** on the status store share (SMB + NTFS)
+  for the upgrade phase to appear on the dashboard (Getting-Started, Configuration, Usage and
+  the offline guide).
+
+### Fixed
+
+- The dashboard roll-up counted each unit of work once instead of summing both a scope and
+  its items (e.g. two servers each installing one binary now read "2 Done", not "4").
 
 ### Tests
 

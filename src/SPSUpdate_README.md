@@ -173,6 +173,12 @@ every server to get a live HTML dashboard of the patching campaign:
 If `StatusStorePath` is empty, the dashboard falls back to the local `Results\status`
 folder (ProductUpdate on other servers is then not captured centrally).
 
+> IMPORTANT: grant the InstallAccount (the scheduled-task service account) **Modify** on the
+> share (SMB share + NTFS). The upgrade/mount sequence tasks run as that account; without
+> write access the upgrade phase will not appear on the dashboard. Run
+> `Test-SPSUpdateReadiness.ps1` to verify it (it probes write access as both your account and
+> the InstallAccount).
+
 ## ✅ Pre-flight readiness check (optional)
 
 ```powershell

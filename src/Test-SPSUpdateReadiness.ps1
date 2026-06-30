@@ -205,10 +205,51 @@ if ($null -ne $cfg -and $cfg.Contains('StatusStorePath') -and -not [string]::IsN
         try {
             Set-Content -Path $probe -Value 'readiness' -ErrorAction Stop
             Remove-Item -Path $probe -Force -ErrorAction SilentlyContinue
-            Add-CheckResult -Section 'StatusStore' -Name 'Status store writable' -Status 'PASS' -Detail $storePath
+            Add-CheckResult -Section 'StatusStore' -Name 'Status store writable (current user)' -Status 'PASS' -Detail $storePath
         }
         catch {
-            Add-CheckResult -Section 'StatusStore' -Name 'Status store writable' -Status 'FAIL' -Detail "Cannot write to $storePath : $($_.Exception.Message)"
+            Add-CheckResult -Section 'StatusStore' -Name 'Status store writable (current user)' -Status 'FAIL' -Detail "Cannot write to $storePath : $($_.Exception.Message)"
+        }
+
+        # CRITICAL: the four upgrade/mount sequence tasks run as the InstallAccount (the
+        # scheduled-task service account), not as the interactive user. If that account
+        # cannot write to the share, the sequences silently fail to publish their status
+        # and the dashboard never shows the upgrade phase. Probe write access AS the
+        # InstallAccount by launching a short process under its credential and checking
+        # whether the file actually lands on the share.
+        $svcCred = $null
+        if ($null -ne $cfg -and $cfg.Contains('CredentialKey') -and $cfg.CredentialKey -and (Get-Command -Name Get-SPSSecret -ErrorAction SilentlyContinue)) {
+            $configFolder2 = Split-Path -Path $ConfigFile -Parent
+            if ([string]::IsNullOrEmpty($configFolder2)) { $configFolder2 = '.' }
+            try { $svcCred = Get-SPSSecret -CredentialKey $cfg.CredentialKey -ConfigPath $configFolder2 -ErrorAction Stop } catch { $svcCred = $null }
+        }
+
+        if ($null -eq $svcCred) {
+            Add-CheckResult -Section 'StatusStore' -Name 'Status store writable (service account)' -Status 'WARN' -Detail 'Could not load the InstallAccount to test; ensure it has Modify on the share (the sequence tasks run as that account)'
+        }
+        else {
+            $svcProbe = Join-Path -Path $storePath -ChildPath (".spsupdate-readiness-svc-{0}.tmp" -f ([guid]::NewGuid().ToString('N')))
+            $svcCmd = "Set-Content -LiteralPath '$svcProbe' -Value 'readiness-svc' -ErrorAction Stop"
+            $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($svcCmd))
+            try {
+                $proc = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+                    -Credential $svcCred `
+                    -WorkingDirectory "$env:SystemRoot" `
+                    -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded) `
+                    -Wait -PassThru -ErrorAction Stop
+                $null = $proc
+                Start-Sleep -Milliseconds 500
+                if (Test-Path -Path $svcProbe) {
+                    Remove-Item -Path $svcProbe -Force -ErrorAction SilentlyContinue
+                    Add-CheckResult -Section 'StatusStore' -Name 'Status store writable (service account)' -Status 'PASS' -Detail "InstallAccount '$($svcCred.UserName)' can write to the share"
+                }
+                else {
+                    Add-CheckResult -Section 'StatusStore' -Name 'Status store writable (service account)' -Status 'FAIL' -Detail "InstallAccount '$($svcCred.UserName)' cannot write to $storePath. Grant it Modify on the share + NTFS; otherwise the upgrade sequences will not appear on the dashboard."
+                }
+            }
+            catch {
+                Add-CheckResult -Section 'StatusStore' -Name 'Status store writable (service account)' -Status 'WARN' -Detail "Could not launch a probe as '$($svcCred.UserName)' ($($_.Exception.Message)). Verify it has 'Log on as a batch job' and Modify on the share."
+            }
         }
     }
 }

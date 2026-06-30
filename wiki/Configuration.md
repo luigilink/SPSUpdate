@@ -143,6 +143,16 @@ files of one campaign live under `<StatusStorePath>\<App>-<Env>-<Farm>\`, with t
 dashboard written there as `_dashboard.html`. See the
 [Usage](./Usage) page for the campaign workflow and the `ResetStatus` action.
 
+### Required permissions
+
+Grant the **InstallAccount** (the account that runs the scheduled tasks) **Modify** rights
+on the share — both the SMB **share** permission and the **NTFS** permission. The four
+upgrade/mount sequence tasks run as that account, so if it cannot write to the share the
+upgrade phase never appears on the dashboard (the ProductUpdate and Wizard sections, written
+by your interactive/master run under your own account, still show — which can hide the
+problem). Run `Test-SPSUpdateReadiness.ps1` to verify both your account and the InstallAccount
+can write to the store before patching.
+
 ## Next Step
 
 For the next steps, go to the [Usage](./Usage) page.

@@ -7,6 +7,7 @@
 - Administrative privileges on each SharePoint Server
 - A service account (`InstallAccount`) whose credential is stored in `Config\secrets.psd1`
 - SharePoint update binaries copied to a local or accessible path (if using `ProductUpdate`)
+- (Optional, for the live dashboard) a UNC share for the status store with **Modify** rights for the InstallAccount — see [Configuration](./Configuration#statusstorepath-live-dashboard)
 
 ## Configure CredSSP
 

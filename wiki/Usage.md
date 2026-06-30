@@ -146,6 +146,17 @@ The status files of one patching campaign live under
 `<StatusStorePath>\<App>-<Env>-<Farm>\`, and the dashboard is written there as
 `_dashboard.html`.
 
+> [!IMPORTANT]
+> **The InstallAccount (the scheduled-task service account) must have Modify rights on
+> the share — both the SMB share permission and the NTFS permission.** The four
+> upgrade/mount sequence tasks run as that account, so if it cannot write to the store the
+> sequences silently fail to publish their status and the **Content database upgrade phase
+> never appears on the dashboard** (only the ProductUpdate and Wizard sections, written by
+> the interactive/master run, show up). The ProductUpdate and Default runs you launch
+> interactively write under your own account, which can mask the problem during testing.
+> `Test-SPSUpdateReadiness.ps1` probes write access both as the current user **and** as the
+> InstallAccount to catch this up front.
+
 ### Run a patched campaign with the dashboard
 
 1. **Reset** the campaign once (clears any previous run):
