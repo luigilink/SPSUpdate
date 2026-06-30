@@ -84,6 +84,18 @@ Describe 'Export-SPSUpdateProgressReport (roll-up counts each unit once)' {
         $h = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $camp) -Raw
         $h | Should -Match '<div class="card-value">2</div><div class="card-label">Done</div>'
     }
+
+    It 'stays overall Running when a scope is Running even if its items are all Done' {
+        # Reproduces the staggered sequence start: Sequence1 scope Running, its DBs all Done,
+        # but sequences 2-4 not started yet. Overall must not flip to Done prematurely.
+        $camp = New-Campaign -Name 'overall-running'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -State 'Running' -Percent 100 -Item 'DB_A' -ItemState 'Done' -ExitCode 0 -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -Item 'DB_B' -ItemState 'Done' -ExitCode 0 -Confirm:$false | Out-Null
+        $h = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $camp) -Raw
+        # Overall badge (first one, in the accent card) must be Running, and the Done count is 2.
+        $h | Should -Match 'card accent[^>]*>.*?<span class="badge Running">'
+        $h | Should -Match '<div class="card-value">2</div><div class="card-label">Done</div>'
+    }
 }
 
 Describe 'Export-SPSUpdateProgressReport (states)' {

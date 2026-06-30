@@ -109,14 +109,22 @@
     }
 
     # ---- Overall roll-up ----------------------------------------------------------
-    # Count each leaf unit of work once: the items when a scope has any (each binary,
-    # each database), otherwise the scope state itself (e.g. the Wizard, which carries a
-    # per-server state but no items). This avoids double counting a scope and its items.
+    # Two separate concerns:
+    #  * Card counts: each leaf unit of work counted once - the items when a scope has any
+    #    (each binary, each database), otherwise the scope state itself (e.g. the Wizard,
+    #    which has a per-server state but no items). This avoids double counting.
+    #  * Overall state: derived from BOTH scope states and item states, so a scope that is
+    #    still Running/Pending keeps the overall "Running" even when the items recorded so
+    #    far all happen to be Done (e.g. during the staggered sequence start).
     $allItemStates = New-Object System.Collections.Generic.List[string]
+    $overallStates = New-Object System.Collections.Generic.List[string]
     foreach ($sc in $scopes) {
+        if ($sc.State) { $overallStates.Add("$($sc.State)") }
         $scopeItems = @($sc.Items)
         if ($scopeItems.Count -gt 0) {
-            foreach ($it in $scopeItems) { if ($it.State) { $allItemStates.Add("$($it.State)") } }
+            foreach ($it in $scopeItems) {
+                if ($it.State) { $allItemStates.Add("$($it.State)"); $overallStates.Add("$($it.State)") }
+            }
         }
         elseif ($sc.State) {
             $allItemStates.Add("$($sc.State)")
@@ -125,13 +133,15 @@
     $countFailed = @($allItemStates | Where-Object { $_ -eq 'Failed' }).Count
     $countRunning = @($allItemStates | Where-Object { $_ -eq 'Running' }).Count
     $countDone = @($allItemStates | Where-Object { $_ -eq 'Done' }).Count
-    $countPending = @($allItemStates | Where-Object { $_ -eq 'Pending' }).Count
-    $countWarning = @($allItemStates | Where-Object { $_ -eq 'Warning' }).Count
+
+    $hasFailed = @($overallStates | Where-Object { $_ -eq 'Failed' }).Count -gt 0
+    $hasActive = @($overallStates | Where-Object { $_ -eq 'Running' -or $_ -eq 'Pending' }).Count -gt 0
+    $hasWarning = @($overallStates | Where-Object { $_ -eq 'Warning' }).Count -gt 0
 
     $overall = if ($scopes.Count -eq 0) { 'Pending' }
-    elseif ($countFailed -gt 0) { 'Failed' }
-    elseif ($countRunning -gt 0 -or $countPending -gt 0) { 'Running' }
-    elseif ($countWarning -gt 0) { 'Warning' }
+    elseif ($hasFailed) { 'Failed' }
+    elseif ($hasActive) { 'Running' }
+    elseif ($hasWarning) { 'Warning' }
     else { 'Done' }
     if ($Completed -and $overall -eq 'Running') { $overall = 'Done' }
 
