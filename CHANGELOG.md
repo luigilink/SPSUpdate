@@ -44,11 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Running/Pending/Failed/Warning) expanded, using native `<details>`/`<summary>` (progressive
   disclosure, accessible, no JS). Each collapsed scope still shows its badge, percentage and a
   compact "N/M done" count on the summary line.
+- The real process exit codes now flow to the dashboard: `Start-SPSProductUpdate` returns the
+  setup.exe exit code (shown in the ProductUpdate item's Exit column, e.g. `0`, `17022` = reboot
+  required), and the Configuration Wizard records the psconfig.exe exit code in its detail
+  (`PSConfig completed (exit 0)`), for the local and remote servers.
 
 ### Fixed
 
 - The dashboard roll-up counted each unit of work once instead of summing both a scope and
   its items (e.g. two servers each installing one binary now read "2 Done", not "4").
+- `Start-SPSProductUpdate` no longer leaks the `iisreset -start` Process object into its output
+  (it is piped to `Out-Null`), so its return value is a clean exit code.
 
 ### Tests
 

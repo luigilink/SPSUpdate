@@ -654,8 +654,20 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                 # ProductUpdate even when the system was actually in a healthy state.
                 # Unblock setup file if it is blocked
                 Unblock-File -Path $fullSetupFilePath -Verbose
-                Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices -Verbose
-                Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail 'installed'
+                $puExitCode = Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices -Verbose
+                if ($null -eq $puExitCode) {
+                    # No install happened: already at or above the patch level.
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail 'already installed'
+                }
+                else {
+                    $puDetail = switch ([int]$puExitCode) {
+                        0 { 'installed' }
+                        17022 { 'installed - reboot required' }
+                        17025 { 'already installed' }
+                        default { "installed (exit $puExitCode)" }
+                    }
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail $puDetail -ExitCode ([int]$puExitCode)
+                }
                 Write-SPSDashboard
             }
             Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed'
@@ -897,8 +909,10 @@ Exception: $_
                     Write-Output "Action Required on server: $($env:COMPUTERNAME). Proceeding to run Configuration Wizard."
                     Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State 'Running' -Detail 'Running PSConfig'
                     Write-SPSDashboard
-                    Start-SPSConfigExe
-                    Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State 'Done' -Detail 'PSConfig completed'
+                    $wizResult = Start-SPSConfigExe
+                    $wizExit = @($wizResult) | Where-Object { $_ -is [int] } | Select-Object -Last 1
+                    $wizDetail = if ($null -ne $wizExit) { "PSConfig completed (exit $([int]$wizExit))" } else { 'PSConfig completed' }
+                    Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State 'Done' -Detail $wizDetail
                 }
                 Write-SPSDashboard
             }
@@ -931,8 +945,10 @@ Exception: $_
                         $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
                         Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Running' -Detail 'Running PSConfig (remote)'
                         Write-SPSDashboard
-                        Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
-                        Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Done' -Detail 'PSConfig completed'
+                        $wizResultRemote = Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
+                        $wizExitRemote = @($wizResultRemote) | Where-Object { $_ -is [int] } | Select-Object -Last 1
+                        $wizDetailRemote = if ($null -ne $wizExitRemote) { "PSConfig completed (exit $([int]$wizExitRemote))" } else { 'PSConfig completed' }
+                        Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Done' -Detail $wizDetailRemote
                     }
                     Write-SPSDashboard
                 }
