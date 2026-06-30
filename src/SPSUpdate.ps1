@@ -819,8 +819,21 @@ Exception: $_
                         Write-Output "Running Scheduled Task $taskName in $script:TaskPath Task Path"
                         $startResult = Start-SPSScheduledTask -Name $taskName -TaskPath $script:TaskPath -ErrorAction Stop
                         Write-Output "Start requested for $($startResult.Name) in $($startResult.TaskPath). Current state: $($startResult.State)"
-                        Write-Output 'Avoid conflicts with OWSTimer process - Pause between 60 to 90 seconds'
-                        Start-Sleep -Seconds (get-random (60..90))
+                        # Refresh the dashboard right after each start so a sequence that
+                        # already began writing its status shows up immediately.
+                        Write-SPSDashboard
+                        # Pause 60-90s between starts to avoid OWSTimer conflicts, but keep
+                        # the dashboard live by regenerating it every ~10s during the wait
+                        # (the started sequences write their per-database progress meanwhile).
+                        $pauseSeconds = (Get-Random -Minimum 60 -Maximum 91)
+                        Write-Output "Avoid conflicts with OWSTimer process - Pause $pauseSeconds seconds"
+                        $waited = 0
+                        while ($waited -lt $pauseSeconds) {
+                            $chunk = [System.Math]::Min(10, ($pauseSeconds - $waited))
+                            Start-Sleep -Seconds $chunk
+                            $waited += $chunk
+                            Write-SPSDashboard
+                        }
                     }
                     catch {
                         # Handle errors during Start scheduled Task for Upgrade SPContentDatabase in Parallel
