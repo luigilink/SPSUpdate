@@ -188,7 +188,22 @@
                 try { $updated = " &middot; updated $([datetime]::Parse($sc.UpdatedAt).ToString('HH:mm:ss'))" } catch { $updated = '' }
             }
 
-            $sections += "<div class=`"scope`"><div class=`"scope-head`">$(& $badge $sc.State) $encServer / $encScope$pctText</div>"
+            $items = @($sc.Items)
+
+            # Compact item summary shown on the (always visible) summary line, e.g. "3/4 done".
+            $itemSummary = ''
+            if ($items.Count -gt 0) {
+                $itemsDone = @($items | Where-Object { "$($_.State)" -eq 'Done' }).Count
+                $itemSummary = " &middot; <span class=`"count`">$itemsDone/$($items.Count) done</span>"
+            }
+
+            # Progressive disclosure: collapse finished scopes (Done/Skipped) by default so the
+            # operator sees what still needs attention without scrolling; keep active ones open.
+            $scopeState = "$($sc.State)"
+            $isFinished = ($scopeState -eq 'Done' -or $scopeState -eq 'Skipped')
+            $openAttr = if ($isFinished) { '' } else { ' open' }
+
+            $sections += "<details class=`"scope`"$openAttr><summary class=`"scope-head`">$(& $badge $sc.State) $encServer / $encScope$pctText$itemSummary</summary>"
             if (-not [string]::IsNullOrEmpty($encDetail)) {
                 $sections += "<div class=`"scope-detail`">$encDetail$updated</div>"
             }
@@ -196,7 +211,6 @@
                 $sections += "<div class=`"scope-detail`">$($updated.TrimStart(' &middot;'))</div>"
             }
 
-            $items = @($sc.Items)
             if ($items.Count -gt 0) {
                 $rows = ''
                 foreach ($it in $items) {
@@ -207,7 +221,7 @@
                 }
                 $sections += "<div class=`"items`"><table><thead><tr><th>Item</th><th>State</th><th>Detail</th><th class=`"num`">Exit</th></tr></thead><tbody>$rows</tbody></table></div>"
             }
-            $sections += '</div>'
+            $sections += '</details>'
         }
         $sections += '</div>'
     }

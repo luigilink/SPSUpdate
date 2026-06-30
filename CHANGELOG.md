@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documented that the InstallAccount needs **Modify** on the status store share (SMB + NTFS)
   for the upgrade phase to appear on the dashboard (Getting-Started, Configuration, Usage and
   the offline guide).
+- The dashboard now collapses finished scopes (Done/Skipped) by default and keeps active ones
+  (Running/Pending/Failed/Warning) expanded, using native `<details>`/`<summary>` (progressive
+  disclosure, accessible, no JS). Each collapsed scope still shows its badge, percentage and a
+  compact "N/M done" count on the summary line.
 
 ### Fixed
 
