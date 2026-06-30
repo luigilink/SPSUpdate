@@ -109,10 +109,18 @@
     }
 
     # ---- Overall roll-up ----------------------------------------------------------
+    # Count each leaf unit of work once: the items when a scope has any (each binary,
+    # each database), otherwise the scope state itself (e.g. the Wizard, which carries a
+    # per-server state but no items). This avoids double counting a scope and its items.
     $allItemStates = New-Object System.Collections.Generic.List[string]
     foreach ($sc in $scopes) {
-        if ($sc.State) { $allItemStates.Add("$($sc.State)") }
-        foreach ($it in @($sc.Items)) { if ($it.State) { $allItemStates.Add("$($it.State)") } }
+        $scopeItems = @($sc.Items)
+        if ($scopeItems.Count -gt 0) {
+            foreach ($it in $scopeItems) { if ($it.State) { $allItemStates.Add("$($it.State)") } }
+        }
+        elseif ($sc.State) {
+            $allItemStates.Add("$($sc.State)")
+        }
     }
     $countFailed = @($allItemStates | Where-Object { $_ -eq 'Failed' }).Count
     $countRunning = @($allItemStates | Where-Object { $_ -eq 'Running' }).Count

@@ -66,6 +66,26 @@ Describe 'Export-SPSUpdateProgressReport (running campaign)' {
     }
 }
 
+Describe 'Export-SPSUpdateProgressReport (roll-up counts each unit once)' {
+    It 'does not double-count a scope and its single item' {
+        $camp = New-Campaign -Name 'count'
+        # Two servers, each a ProductUpdate scope with exactly one binary item, all Done.
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Item 'uber.exe' -ItemState 'Done' -ExitCode 0 -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'SCH1' -State 'Done' -Item 'uber.exe' -ItemState 'Done' -ExitCode 0 -Confirm:$false | Out-Null
+        $h = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $camp) -Raw
+        # The 'Done' card must read 2 (one per server), not 4 (scope + item per server).
+        $h | Should -Match '<div class="card-value">2</div><div class="card-label">Done</div>'
+    }
+
+    It 'counts an item-less scope (wizard) once via its scope state' {
+        $camp = New-Campaign -Name 'count-wizard'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Wizard' -Phase 'Wizard' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Wizard' -Phase 'Wizard' -Server 'SCH1' -State 'Done' -Confirm:$false | Out-Null
+        $h = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $camp) -Raw
+        $h | Should -Match '<div class="card-value">2</div><div class="card-label">Done</div>'
+    }
+}
+
 Describe 'Export-SPSUpdateProgressReport (states)' {
     It 'reports Failed overall when any item failed' {
         $camp = New-Campaign -Name 'fail'
