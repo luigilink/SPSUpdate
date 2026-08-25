@@ -8,9 +8,14 @@ SharePoint environment.
 > This guide ships inside the release package so it is available offline on the server.
 > For the full online documentation, see the [SPSUpdate Wiki](https://github.com/luigilink/SPSUpdate/wiki).
 
+> **Subscription Edition only.** SharePoint Server 2016 and 2019 reached end of support on
+> 14 July 2026. If you still run those versions (including generating the ContentDatabase
+> inventory on a 2019 source farm during a migration), use the previous major release
+> v4.2.0.
+
 ## 📦 Prerequisites
 
-- SharePoint Server 2016, 2019 or Subscription Edition
+- SharePoint Server Subscription Edition
 - Administrator privileges on the server
 - PowerShell 5.1 or later (no DSC module required)
 - A service account (`InstallAccount`) for the scheduled tasks and CredSSP remoting
@@ -200,8 +205,7 @@ E:\SCRIPT\SPSUpdate.ps1 -Action Uninstall -ConfigFile 'E:\SCRIPT\Config\CONTOSO-
 
 - Creates a `Logs` folder and a per-run transcript (sequence/action-aware naming).
 - Verifies the script runs with Administrator rights before proceeding.
-- Detects the installed SharePoint version (`Get-SPSInstalledProductVersion`) and loads the
-  appropriate SharePoint snap-in (2016/2019) or the `SharePointServer` module (SE).
+- Loads the `SharePointServer` module (SharePoint Server Subscription Edition).
 - Full mode creates four sequence tasks (`SPSUpdate-Sequence1..4`) and starts them in
   parallel (with short random sleeps to avoid OWSTimer conflicts).
 - Remote operations (PSConfig, side-by-side) use CredSSP and fail with a clear error if the
