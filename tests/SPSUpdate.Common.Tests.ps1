@@ -36,8 +36,8 @@ Describe 'SPSUpdate.Common module' {
         { Test-ModuleManifest -Path $modulePath -ErrorAction Stop } | Should -Not -Throw
     }
 
-    It 'manifest version is 4.0.0 or higher' {
-        (Test-ModuleManifest -Path $modulePath).Version | Should -BeGreaterOrEqual ([version]'4.2.0')
+    It 'manifest version is 5.0.0 or higher' {
+        (Test-ModuleManifest -Path $modulePath).Version | Should -BeGreaterOrEqual ([version]'5.0.0')
     }
 
     It 'exports exactly the expected public functions' {
