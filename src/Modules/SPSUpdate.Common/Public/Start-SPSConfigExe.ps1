@@ -2,19 +2,9 @@
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param ()
 
-    # Check which version of SharePoint is installed
-    $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
-    $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
-    $getSPInstalledProductVersion = (Get-Command $fullPath).FileVersionInfo
-
-    if ($getSPInstalledProductVersion.FileMajorPart -eq 15) {
-        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\15.0\WSS'
-        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\15\BIN"
-    }
-    else {
-        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\16.0\WSS'
-        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
-    }
+    # SharePoint Server Subscription Edition installs under the 16.0 hive.
+    $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\16.0\WSS'
+    $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
     $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
 
     # Read LanguagePackInstalled and SetupType registry keys
@@ -44,10 +34,8 @@
             $count++
         }
 
-        # Fix for issue with psconfig on SharePoint 2019
-        if ($getSPInstalledProductVersion.FileMajorPart -eq 16) {
-            Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
-        }
+        # Prepare the farm for the in-place build-to-build upgrade before running psconfig.
+        Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
 
         $stdOutTempFile = "$env:TEMP\$((New-Guid).Guid)"
         $psconfig = Start-Process -FilePath $psconfigExe `

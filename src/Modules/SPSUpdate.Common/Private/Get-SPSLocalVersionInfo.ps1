@@ -2,23 +2,13 @@
     [OutputType([System.Version])]
     param
     (
-        # Parameter help description
-        [Parameter(Mandatory = $true)]
-        [ValidateSet('2016', '2019', 'SE')]
-        [System.String]
-        $ProductVersion,
-
+        # SharePoint Server Subscription Edition is the only supported product version.
         [Parameter()]
         [Switch]
         $IsWssPackage
     )
 
-    if ($ProductVersion -eq 'SE') {
-        $spVersion = 'Subscription Edition'
-    }
-    else {
-        $spVersion = $ProductVersion
-    }
+    $spVersion = 'Subscription Edition'
 
     $productNameRegEx = "Microsoft SharePoint (Foundation|Server) $($spVersion) Core"
     if ($IsWssPackage) {

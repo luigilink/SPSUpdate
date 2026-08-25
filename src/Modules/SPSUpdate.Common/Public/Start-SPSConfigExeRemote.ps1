@@ -11,17 +11,8 @@
         $InstallAccount
     )
 
-    # Check which version of SharePoint is installed
-    $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
-    $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
-    $getSPInstalledProductVersion = (Get-Command $fullPath).FileVersionInfo
-
-    if ($getSPInstalledProductVersion.FileMajorPart -eq 15) {
-        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\15\BIN"
-    }
-    else {
-        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
-    }
+    # SharePoint Server Subscription Edition installs under the 16.0 hive.
+    $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
     $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
 
     # Start wizard
@@ -32,11 +23,6 @@
         -ScriptBlock {
 
         $psconfigExe = $args[0]
-
-        # Check which version of SharePoint is installed
-        $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
-        $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
-        $getSPInstalledProductVersion = (Get-Command $fullPath).FileVersionInfo
 
         Write-Verbose -Message "Starting 'Product Version Job' timer job"
         $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
@@ -55,10 +41,8 @@
             $count++
         }
 
-        # Fix for issue with psconfig on SharePoint 2019
-        if ($getSPInstalledProductVersion.FileMajorPart -ne 15) {
-            Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
-        }
+        # Prepare the farm for the in-place build-to-build upgrade before running psconfig.
+        Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
 
         $stdOutTempFile = "$env:TEMP\$((New-Guid).Guid)"
         $psconfig = Start-Process -FilePath $psconfigExe `

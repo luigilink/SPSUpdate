@@ -40,44 +40,26 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
     $fileVersion = $setupFileInfo.VersionInfo.FileVersion
     Write-Verbose -Message "Update has version $fileVersion"
     $fileVersionInfo = New-Object -TypeName System.Version -ArgumentList $fileVersion
-    if ($fileVersionInfo.Build.ToString().Length -eq 4) {
-        $sharePointVersion = '2016'
-    }
-    else {
-        if ($fileVersionInfo.Build -lt 13000) {
-            $sharePointVersion = '2019'
-        }
-        else {
-            $sharePointVersion = 'SE'
-        }
-    }
 
     Write-Verbose -Message "Update is a Cumulative Update."
-    # For SP 2016 + 2019 Patches
+    # Subscription Edition cumulative update package.
     $setupFileInformation = New-Object -TypeName System.IO.FileInfo -ArgumentList  $SetupFile
     if ($setupFileInformation.Name.StartsWith("wssloc")) {
         Write-Verbose -Message "Cumulative Update is multilingual"
-        $versionInfo = Get-SPSLocalVersionInfo -ProductVersion $sharePointVersion -IsWssPackage
+        $versionInfo = Get-SPSLocalVersionInfo -IsWssPackage
     }
     else {
         Write-Verbose -Message "Cumulative Update is generic"
-        $versionInfo = Get-SPSLocalVersionInfo -ProductVersion $sharePointVersion
+        $versionInfo = Get-SPSLocalVersionInfo
     }
 
     Write-Verbose -Message "The lowest version of any SharePoint component is $($versionInfo)"
     if ($versionInfo -lt $fileVersionInfo) {
         # Version of SharePoint is lower than the patch version. Patch is not installed.
         Write-Verbose -Message "The version of SharePoint installed is lower than the update. Starting update process."
-        $installedVersion = Get-SPSInstalledProductVersion
         if ($ShutdownServices) {
-            $listOfServices = @("SPSearchHostController", "SPTimerV4", "IISADMIN")
-            if ($installedVersion.ProductMajorPart -eq 15) {
-
-                $listOfServices += "OSearch15"
-            }
-            else {
-                $listOfServices += "OSearch16"
-            }
+            # Subscription Edition search service instance is OSearch16.
+            $listOfServices = @("SPSearchHostController", "SPTimerV4", "IISADMIN", "OSearch16")
             Write-Verbose -Message "Gettings services status before stopping services for installation."
             $servicesStatusFilePath = Join-Path -Path $PSScriptRoot -ChildPath "ServicesStatus_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMddHHmmss').json"
             Get-Service -Name $listOfServices -ErrorAction SilentlyContinue | Select-Object Name, StartType, Status | ConvertTo-Json | Set-Content -Path $servicesStatusFilePath -Force
