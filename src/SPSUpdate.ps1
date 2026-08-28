@@ -347,16 +347,11 @@ Write-Output '-----------------------------------------------'
 Write-Verbose -Message "Setting power management plan to 'High Performance'..."
 Start-Process -FilePath "$env:SystemRoot\system32\powercfg.exe" -ArgumentList '/s 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' -NoNewWindow
 
-# 1. Load SharePoint Powershell Snapin or Import-Module
+# 1. Load the SharePointServer module (SharePoint Server Subscription Edition)
 try {
     $installedVersion = Get-SPSInstalledProductVersion
     Write-Output "Installed SharePoint Product Version: $($installedVersion.FileVersion)"
-    if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999) {
-        if ($null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue)) {
-            Add-PSSnapin Microsoft.SharePoint.PowerShell
-        }
-    }
-    else {
+    if ($null -eq (Get-Module -Name SharePointServer)) {
         Import-Module SharePointServer -Verbose:$false -WarningAction SilentlyContinue
     }
 }

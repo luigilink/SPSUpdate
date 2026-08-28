@@ -66,6 +66,10 @@ is typically used on the source farm before a farm upgrade (for example SharePoi
 2019 → Subscription Edition) so the inventory can be copied to the target farm and consumed
 by the `MountContentDatabase` flow.
 
+> Since v5.0.0 SPSUpdate is Subscription Edition only. To run `InitContentDB` on a
+> **SharePoint Server 2019 source farm** during a 2019 → Subscription Edition migration, use
+> the previous major release [v4.2.0](https://github.com/luigilink/SPSUpdate/releases/tag/v4.2.0).
+
 It also writes a self-contained HTML report of the inventory under `Results\` (see below).
 
 ## ContentDatabase inventory report

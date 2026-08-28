@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'SPSUpdate.Common.psm1'
-    ModuleVersion     = '4.2.0'
+    ModuleVersion     = '5.0.0'
     GUID              = 'd6f4e2b7-3a1c-4d8e-9f2a-6c5b7e0a1d34'
     Author            = 'Jean-Cyril DROUHIN'
     CompanyName       = 'luigilink'

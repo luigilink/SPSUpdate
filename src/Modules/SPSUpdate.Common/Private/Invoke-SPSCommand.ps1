@@ -19,22 +19,16 @@
     )
     $VerbosePreference = 'Continue'
 
-    # Base script to ensure the SharePoint snap-in is loaded. On SharePoint 2016/2019
-    # the legacy PSSnapin is required; on Subscription Edition the SharePointServer
-    # module is auto-loaded, so no base script is prepended.
-    $installedVersion = Get-SPSInstalledProductVersion
-    if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999) {
-        $baseScript = @"
-            if (`$null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue))
+    # Base script to ensure the SharePointServer module is loaded in the remote session.
+    # SharePoint Server Subscription Edition exposes its cmdlets through the SharePointServer
+    # module; load it idempotently before running the caller's script block.
+    $baseScript = @"
+            if (`$null -eq (Get-Module -Name SharePointServer))
             {
-                Add-PSSnapin Microsoft.SharePoint.PowerShell
+                Import-Module SharePointServer -Verbose:`$false -WarningAction SilentlyContinue
             }
 
 "@
-    }
-    else {
-        $baseScript = ''
-    }
 
     # Prepare the arguments for Invoke-Command
     $invokeArgs = @{
