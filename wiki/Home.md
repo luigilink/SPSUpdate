@@ -12,6 +12,7 @@ SPSUpdate installs the update binaries, mounts and/or upgrades content databases
 - Parallel content-database mount/upgrade across 4 sequences (LPT-balanced by size)
 - Post-setup Configuration Wizard (PSConfig) on local and remote servers via CredSSP
 - Side-by-side token configuration for zero-downtime patching
+- Near real-time HTML patching dashboard (live progress across servers, sequences and PSConfig)
 - Configuration as a PowerShell data file (`*.psd1`)
 - Service credential stored as a DPAPI-encrypted `secrets.psd1` — no third-party module
 - Windows Event Log instrumentation (dedicated `SPSUpdate` log)
@@ -35,7 +36,7 @@ The credential used for remoting and scheduled tasks is read from `Config\secret
 
 - [Getting Started](Getting-Started) — prerequisites, CredSSP, installation, first run
 - [Configuration](Configuration) — `*.psd1` environment config and `secrets.psd1` explained
-- [Usage](Usage) — actions, sequences, scheduling, output and the event log
+- [Usage](Usage) — actions, sequences, scheduling, output, the live dashboard and the event log
 - [Release Process](Release-Process) — for maintainers: how to ship a new version
 
 ## Project links

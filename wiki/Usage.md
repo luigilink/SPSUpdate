@@ -18,7 +18,7 @@ logic lives in the `SPSUpdate.Common` module; the script just orchestrates it.
 | Parameter | Description |
 | --- | --- |
 | `ConfigFile` | Path to the environment configuration file (`*.psd1`). **Required.** |
-| `Action` | (Optional) `Install`, `Uninstall`, `Default`, `ProductUpdate` or `InitContentDB`. `Install`/`Uninstall` manage the scheduled tasks and the stored secret (`Install` requires `InstallAccount`). `ProductUpdate` installs the binaries locally. `InitContentDB` (re)generates the ContentDatabase inventory JSON. Defaults to `Default`. |
+| `Action` | (Optional) `Install`, `Uninstall`, `Default`, `ProductUpdate`, `InitContentDB` or `ResetStatus`. `Install`/`Uninstall` manage the scheduled tasks and the stored secret (`Install` requires `InstallAccount`). `ProductUpdate` installs the binaries locally. `InitContentDB` (re)generates the ContentDatabase inventory JSON. `ResetStatus` clears the status store campaign and writes an initial live dashboard so you can open it in a browser before patching begins (see [Near real-time patching dashboard](#near-real-time-patching-dashboard)). Defaults to `Default`. |
 | `Sequence` | (Optional, 1–4) Internal: selects which content-database group a parallel scheduled task processes. |
 | `InstallAccount` | (Optional) Required with `-Action Install`. The service account stored in `secrets.psd1`. |
 
@@ -72,6 +72,16 @@ by the `MountContentDatabase` flow.
 
 It also writes a self-contained HTML report of the inventory under `Results\` (see below).
 
+### Example 7: ResetStatus (prepare the live dashboard)
+
+```powershell
+.\SPSUpdate.ps1 -ConfigFile 'CONTOSO-PROD-CONTENT.psd1' -Action ResetStatus
+```
+
+This clears the status store campaign folder and writes an empty **live dashboard**
+(`_dashboard.html`) you can open in a browser before the patching campaign starts. See
+[Near real-time patching dashboard](#near-real-time-patching-dashboard) for the full workflow.
+
 ## ContentDatabase inventory report
 
 Whenever the inventory JSON is (re)generated — by `-Action InitContentDB`, or by the
@@ -109,22 +119,6 @@ Export-SPSUpdateDbReport -InputFile '.\Config\contoso-PROD-CONTENT-ContentDBs.js
 3. Runs PSConfig on the local (master) server when a patch action is required, then on each
    remote server over CredSSP.
 4. Configures the side-by-side token and copies side-by-side files (when enabled).
-
-## Logging
-
-Each run starts a transcript under `Logs\` (the file name encodes the application,
-environment and — when relevant — the sequence or action). The ContentDatabase inventory
-HTML report is written under `Results\`. Lifecycle and error events are also written to the
-dedicated **`SPSUpdate` Windows Event Log** via `Add-SPSUpdateEvent`.
-
-## Error handling
-
-- Ensure the account running the script has administrator rights and access to the farm.
-- A missing secret raises a clear error pointing you to `-Action Install`.
-
-## Notes
-
-- Test the script in a non-production environment before deploying it widely.
 
 ## Near real-time patching dashboard
 
@@ -189,6 +183,22 @@ The status files of one patching campaign live under
 
 The dashboard shows the overall state, per-server / per-sequence progress, per-database and
 per-binary item states with exit codes, and a completion percentage for each sequence.
+
+## Logging
+
+Each run starts a transcript under `Logs\` (the file name encodes the application,
+environment and — when relevant — the sequence or action). The ContentDatabase inventory
+HTML report is written under `Results\`. Lifecycle and error events are also written to the
+dedicated **`SPSUpdate` Windows Event Log** via `Add-SPSUpdateEvent`.
+
+## Error handling
+
+- Ensure the account running the script has administrator rights and access to the farm.
+- A missing secret raises a clear error pointing you to `-Action Install`.
+
+## Notes
+
+- Test the script in a non-production environment before deploying it widely.
 
 ## Pre-flight readiness check
 

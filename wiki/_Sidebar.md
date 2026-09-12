@@ -4,6 +4,7 @@
 - [🚀 Getting Started](Getting-Started)
 - [⚙️ Configuration](Configuration)
 - [📖 Usage](Usage)
+  - [📊 Live dashboard](Usage#near-real-time-patching-dashboard)
 - [📦 Release Process](Release-Process)
 
 ---
