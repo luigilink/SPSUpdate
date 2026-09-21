@@ -399,6 +399,34 @@ Exception: $_
     Add-SPSUpdateEvent -Message $catchMessage -Source 'Initialize-SPSContentDbJsonFile' -EntryType 'Error'
 }
 
+# Total number of real content databases across the four sequences. On a farm without
+# content databases (for example a dedicated search farm) this stays 0, and the master
+# run skips the mount/upgrade sequences entirely so they are not shown on the dashboard.
+# Initialize-SPSContentDbJsonFile always writes a valid inventory (four arrays, empty on a
+# search farm), so $jsonDbCfg is null only when loading the inventory genuinely failed
+# above. In that case fail closed rather than silently treating it as zero databases.
+$contentDbTotal = 0
+if ($null -ne $jsonDbCfg) {
+    foreach ($seqIndex in 1..4) {
+        $contentDbTotal += @($jsonDbCfg."SPContentDatabase$seqIndex" |
+                Where-Object { $null -ne $_ -and -not [string]::IsNullOrEmpty($_.Name) }).Count
+    }
+}
+elseif ($Action -eq 'Default' -and ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)) {
+    $catchMessage = @"
+ContentDatabase inventory could not be loaded for SPFARM: $($spFarmName)
+Aborting to avoid silently skipping the content-database mount/upgrade sequences.
+Inventory file: $($spsUpdateDBsPath)
+"@
+    Write-Error -Message $catchMessage
+    Add-SPSUpdateEvent -Message $catchMessage -Source 'Initialize-SPSContentDbJsonFile' -EntryType 'Error'
+    if ($script:TranscriptStarted) {
+        Stop-Transcript | Out-Null
+        $script:TranscriptStarted = $false
+    }
+    exit 1
+}
+
 # 3. Execute Action parameter
 switch ($Action) {
     'ResetStatus' {
@@ -698,7 +726,11 @@ Exception: $_
                     3 { $dbs = $jsonDbCfg.SPContentDatabase3 }
                     4 { $dbs = $jsonDbCfg.SPContentDatabase4 }
                 }
-                $dbList = @($dbs)
+                # Filter out any null/empty placeholder before processing. On a farm
+                # without content databases the JSON property can be missing, and @($null)
+                # would otherwise yield a one-element array whose empty Name fails to bind
+                # to -Name. Keeping only real entries makes an empty sequence a clean no-op.
+                $dbList = @($dbs | Where-Object { $null -ne $_ -and -not [string]::IsNullOrEmpty($_.Name) })
                 $dbTotal = $dbList.Count
                 $dbDone = 0
                 Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Running' -Percent 0 -Detail "$dbTotal database(s)"
@@ -779,7 +811,10 @@ Exception: $_
             # Mount and/or Upgrade SPContentDatabase via parallel scheduled tasks.
             # The sequence tasks themselves decide what to do for each database based on
             # the MountContentDatabase and UpgradeContentDatabase flags in the config.
-            if ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) {
+            # Skip the sequences entirely when the farm has no content database (for
+            # example a dedicated search farm): there is nothing to mount or upgrade, and
+            # the dashboard then shows only ProductUpdate, the Wizard and side-by-side.
+            if (($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) -and $contentDbTotal -gt 0) {
                 # Add scheduled Task for Upgrade SPContentDatabase in Parallel
                 foreach ($taskId in (1..4)) {
                     try {
@@ -890,6 +925,9 @@ Exception: $_
                     }
                 }
                 Write-Output "All Scheduled Tasks have finished"
+            }
+            elseif ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) {
+                Write-Output 'No content database on this farm (for example a dedicated search farm); skipping the mount/upgrade sequences.'
             }
 
             # Run Configuration Wizard on Master SharePoint Server
