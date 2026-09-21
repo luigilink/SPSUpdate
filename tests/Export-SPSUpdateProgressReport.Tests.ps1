@@ -130,3 +130,31 @@ Describe 'Export-SPSUpdateProgressReport (states)' {
         $h | Should -Not -Match 'DB <x> & y'
     }
 }
+
+Describe 'Export-SPSUpdateProgressReport (search farm, no content databases)' {
+    BeforeAll {
+        # A dedicated search farm has no content databases, so no Sequence scope is ever
+        # written: only ProductUpdate and the Configuration Wizard. The dashboard must
+        # render cleanly, without a Content database upgrade section or empty sequences.
+        $script:sfCamp = New-Campaign -Name 'searchfarm'
+        Set-SPSUpdateStatus -CampaignPath $script:sfCamp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'SRCH1' -State 'Done' -Item 'uber.exe' -ItemState 'Done' -ExitCode 0 -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $script:sfCamp -Scope 'Wizard' -Phase 'Wizard' -Server 'SRCH1' -State 'Done' -Detail 'PSConfig done' -Confirm:$false | Out-Null
+        $script:sfHtml = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $script:sfCamp -EnvName 'PROD' -AppCode 'zebes' -FarmName 'SEARCH' -Completed) -Raw
+    }
+
+    It 'renders the ProductUpdate and Configuration Wizard sections' {
+        $script:sfHtml | Should -Match 'Product update'
+        $script:sfHtml | Should -Match 'Configuration [Ww]izard'
+        $script:sfHtml | Should -Match 'SRCH1'
+    }
+
+    It 'does not render a Content database upgrade section or any sequence' {
+        $script:sfHtml | Should -Not -Match 'Content database upgrade'
+        $script:sfHtml | Should -Not -Match 'Sequence'
+    }
+
+    It 'reports a completed campaign with no failures' {
+        $script:sfHtml | Should -Match 'Campaign completed'
+        $script:sfHtml | Should -Not -Match 'class="badge Failed"'
+    }
+}
