@@ -82,4 +82,50 @@ Describe 'Test-SPSPendingReboot' {
         $result.IsPending | Should -BeTrue
         $result.Reasons | Should -Contain 'PendingComputerRename'
     }
+
+    It 'flags the Component Based Servicing reboot-in-progress marker' {
+        Mock -CommandName Get-ChildItem -ModuleName SPSUpdate.Common -MockWith { @() }
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith { $null }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $false }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $true } -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootInProgress'
+        }
+
+        (Test-SPSPendingReboot).Reasons | Should -Contain 'ComponentBasedServicingRebootInProgress'
+    }
+
+    It 'flags the Server Manager current-reboot-attempts marker' {
+        Mock -CommandName Get-ChildItem -ModuleName SPSUpdate.Common -MockWith { @() }
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith { $null }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $false }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $true } -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Microsoft\ServerManager\CurrentRebootAttempts'
+        }
+
+        (Test-SPSPendingReboot).Reasons | Should -Contain 'ServerManagerCurrentRebootAttempts'
+    }
+
+    It 'flags the ConfigMgr reboot-pending marker' {
+        Mock -CommandName Get-ChildItem -ModuleName SPSUpdate.Common -MockWith { @() }
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith { $null }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $false }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $true } -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Microsoft\SMS\Mobile Client\Reboot Management\RebootData'
+        }
+
+        (Test-SPSPendingReboot).Reasons | Should -Contain 'ConfigMgrRebootPending'
+    }
+
+    It 'flags Windows Update services pending when entries exist' {
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith { $null }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $false }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $true } -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Services\Pending'
+        }
+        Mock -CommandName Get-ChildItem -ModuleName SPSUpdate.Common -MockWith { @([pscustomobject]@{ Name = 'PendingEntry' }) }
+
+        $result = Test-SPSPendingReboot
+        $result.IsPending | Should -BeTrue
+        $result.Reasons | Should -Contain 'WindowsUpdateServicesPending'
+    }
 }
