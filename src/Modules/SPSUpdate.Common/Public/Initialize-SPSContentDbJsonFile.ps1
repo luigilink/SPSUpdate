@@ -26,8 +26,17 @@
         [System.Double]$SizeInMB
     }
 
-    #Get all content databases
-    $spAllDatabases = Get-SPContentDatabase -ErrorAction SilentlyContinue
+    # Get all content databases. Use -ErrorAction Stop so a genuine query failure
+    # (SharePoint unavailable, access denied, ...) is not silently swallowed and
+    # misreported as a zero-database farm: it throws, the caller catches it and the run
+    # fails closed instead of skipping the mount/upgrade sequences. A real search farm
+    # simply returns no databases (no error), which is handled by the else branch below.
+    try {
+        $spAllDatabases = Get-SPContentDatabase -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to enumerate content databases while initializing the inventory: $($_.Exception.Message)"
+    }
 
     if ($null -ne $spAllDatabases) {
         # --- LPT (Longest Processing Time First) scheduling ---
@@ -79,47 +88,57 @@
                     -f ($s + 1), $sequenceLists[$s].Count, $loadMB, $pct)
         }
         Write-Output '-------------------------------------------'
+    }
+    else {
+        # No content database on this farm (for example a dedicated search farm).
+        # Still emit a valid inventory with four empty sequences so callers can read
+        # the file without failing; the mount/upgrade sequences are simply skipped.
+        Write-Output '--- ContentDatabase Distribution Report ---'
+        Write-Output 'Total : 0 database(s) | 0 MB'
+        Write-Output 'No content database found on this farm; the mount/upgrade sequences will be skipped.'
+        Write-Output '-------------------------------------------'
+    }
 
-        #Add each array to jsonObject
-        $jsonObject | Add-Member -MemberType NoteProperty `
-            -Name 'SPContentDatabase1' `
-            -Value $tbSPContentDb1
+    # Always write the inventory (the four sequence arrays, possibly empty) so the file
+    # exists and is valid even on farms without content databases.
+    $jsonObject | Add-Member -MemberType NoteProperty `
+        -Name 'SPContentDatabase1' `
+        -Value $tbSPContentDb1
 
-        $jsonObject | Add-Member -MemberType NoteProperty `
-            -Name 'SPContentDatabase2' `
-            -Value $tbSPContentDb2
+    $jsonObject | Add-Member -MemberType NoteProperty `
+        -Name 'SPContentDatabase2' `
+        -Value $tbSPContentDb2
 
-        $jsonObject | Add-Member -MemberType NoteProperty `
-            -Name 'SPContentDatabase3' `
-            -Value $tbSPContentDb3
+    $jsonObject | Add-Member -MemberType NoteProperty `
+        -Name 'SPContentDatabase3' `
+        -Value $tbSPContentDb3
 
-        $jsonObject | Add-Member -MemberType NoteProperty `
-            -Name 'SPContentDatabase4' `
-            -Value $tbSPContentDb4
+    $jsonObject | Add-Member -MemberType NoteProperty `
+        -Name 'SPContentDatabase4' `
+        -Value $tbSPContentDb4
 
-        # Serialize once and write both the canonical file (consumed by SPSUpdate.ps1)
-        # and a timestamped snapshot in the same folder so previous inventories are
-        # retained for troubleshooting and rollback.
-        $jsonPayload = $jsonObject | ConvertTo-Json
-        $jsonPayload | Set-Content -Path $Path -Force
+    # Serialize once and write both the canonical file (consumed by SPSUpdate.ps1)
+    # and a timestamped snapshot in the same folder so previous inventories are
+    # retained for troubleshooting and rollback.
+    $jsonPayload = $jsonObject | ConvertTo-Json
+    $jsonPayload | Set-Content -Path $Path -Force
 
-        try {
-            $snapshotDir       = [System.IO.Path]::GetDirectoryName($Path)
-            $snapshotBaseName  = [System.IO.Path]::GetFileNameWithoutExtension($Path)
-            $snapshotExtension = [System.IO.Path]::GetExtension($Path)
-            $snapshotTimestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
-            $snapshotFileName  = '{0}_{1}{2}' -f $snapshotBaseName, $snapshotTimestamp, $snapshotExtension
-            $snapshotPath      = if ([string]::IsNullOrEmpty($snapshotDir)) {
-                $snapshotFileName
-            }
-            else {
-                Join-Path -Path $snapshotDir -ChildPath $snapshotFileName
-            }
-            $jsonPayload | Set-Content -Path $snapshotPath -Force
-            Write-Output "ContentDatabase inventory snapshot saved to: $snapshotPath"
+    try {
+        $snapshotDir       = [System.IO.Path]::GetDirectoryName($Path)
+        $snapshotBaseName  = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+        $snapshotExtension = [System.IO.Path]::GetExtension($Path)
+        $snapshotTimestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
+        $snapshotFileName  = '{0}_{1}{2}' -f $snapshotBaseName, $snapshotTimestamp, $snapshotExtension
+        $snapshotPath      = if ([string]::IsNullOrEmpty($snapshotDir)) {
+            $snapshotFileName
         }
-        catch {
-            Write-Verbose -Message "Failed to write ContentDatabase inventory snapshot: $($_.Exception.Message)"
+        else {
+            Join-Path -Path $snapshotDir -ChildPath $snapshotFileName
         }
+        $jsonPayload | Set-Content -Path $snapshotPath -Force
+        Write-Output "ContentDatabase inventory snapshot saved to: $snapshotPath"
+    }
+    catch {
+        Write-Verbose -Message "Failed to write ContentDatabase inventory snapshot: $($_.Exception.Message)"
     }
 }
