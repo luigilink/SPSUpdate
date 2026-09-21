@@ -3,6 +3,12 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.1] - 2026-09-21
+
+### Fixed
+
+- Near real-time dashboard on a farm without content databases (for example a dedicated search farm): the mount/upgrade sequences no longer fail with "Cannot bind argument to parameter 'Name' because it is an empty string." `Initialize-SPSContentDbJsonFile` now always writes a valid inventory (four sequence arrays, possibly empty) even when `Get-SPContentDatabase` returns nothing; the master `Default` run skips the mount/upgrade sequences when the farm has no content database (so the dashboard shows only ProductUpdate, the Configuration Wizard and side-by-side); and each sequence sub-run defensively filters out empty entries before processing.
+
 ## [5.0.0] - 2026-08-25
 
 ### Removed
