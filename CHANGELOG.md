@@ -5,6 +5,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `Test-SPSPendingReboot` now normalizes the `WindowsUpdate\Services\Pending` child-item query with `@(...)`, so a single pending entry (a scalar on Windows PowerShell 5.1) is still counted reliably.
+
+### Added
+
+- Behavioural Pester coverage for `ConvertTo-SPSHtmlEncoded`, `Test-SPSPendingReboot` (all reboot markers plus multi-marker aggregation), and the `Mount-SPSContentDatabase` / `Update-SPSContentDatabase` content-database wrappers.
+
 ## [5.0.1] - 2026-09-21
 
 ### Fixed

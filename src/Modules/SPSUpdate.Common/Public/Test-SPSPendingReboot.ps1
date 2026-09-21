@@ -20,8 +20,10 @@
     # WindowsUpdate\Services\Pending can exist even after reboot; require at least one child entry.
     $wuServicesPendingPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Services\Pending'
     if (Test-Path -Path $wuServicesPendingPath -ErrorAction SilentlyContinue) {
-        $wuPendingEntries = Get-ChildItem -Path $wuServicesPendingPath -ErrorAction SilentlyContinue
-        if ($null -ne $wuPendingEntries -and $wuPendingEntries.Count -gt 0) {
+        # Wrap in @() so a single child key (a scalar on Windows PowerShell 5.1) still
+        # exposes a reliable .Count.
+        $wuPendingEntries = @(Get-ChildItem -Path $wuServicesPendingPath -ErrorAction SilentlyContinue)
+        if ($wuPendingEntries.Count -gt 0) {
             $rebootReasons.Add('WindowsUpdateServicesPending')
         }
     }
