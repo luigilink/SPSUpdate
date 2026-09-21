@@ -402,12 +402,29 @@ Exception: $_
 # Total number of real content databases across the four sequences. On a farm without
 # content databases (for example a dedicated search farm) this stays 0, and the master
 # run skips the mount/upgrade sequences entirely so they are not shown on the dashboard.
+# Initialize-SPSContentDbJsonFile always writes a valid inventory (four arrays, empty on a
+# search farm), so $jsonDbCfg is null only when loading the inventory genuinely failed
+# above. In that case fail closed rather than silently treating it as zero databases.
 $contentDbTotal = 0
 if ($null -ne $jsonDbCfg) {
     foreach ($seqIndex in 1..4) {
         $contentDbTotal += @($jsonDbCfg."SPContentDatabase$seqIndex" |
                 Where-Object { $null -ne $_ -and -not [string]::IsNullOrEmpty($_.Name) }).Count
     }
+}
+elseif ($Action -eq 'Default' -and ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)) {
+    $catchMessage = @"
+ContentDatabase inventory could not be loaded for SPFARM: $($spFarmName)
+Aborting to avoid silently skipping the content-database mount/upgrade sequences.
+Inventory file: $($spsUpdateDBsPath)
+"@
+    Write-Error -Message $catchMessage
+    Add-SPSUpdateEvent -Message $catchMessage -Source 'Initialize-SPSContentDbJsonFile' -EntryType 'Error'
+    if ($script:TranscriptStarted) {
+        Stop-Transcript | Out-Null
+        $script:TranscriptStarted = $false
+    }
+    exit 1
 }
 
 # 3. Execute Action parameter
