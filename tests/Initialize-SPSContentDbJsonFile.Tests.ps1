@@ -19,7 +19,7 @@ AfterAll {
 
 Describe 'Initialize-SPSContentDbJsonFile - no content database (search farm)' {
     It 'writes a valid inventory with four empty sequences' {
-        function Get-SPContentDatabase { $null }
+        function Get-SPContentDatabase { [CmdletBinding()] param() $null }
         . $script:funcPath
 
         $path = Join-Path -Path $script:tmpDir -ChildPath 'app-PROD-SEARCH-ContentDBs.json'
@@ -33,7 +33,7 @@ Describe 'Initialize-SPSContentDbJsonFile - no content database (search farm)' {
     }
 
     It 'produces a property that reads back as an empty array (no phantom null entry)' {
-        function Get-SPContentDatabase { $null }
+        function Get-SPContentDatabase { [CmdletBinding()] param() $null }
         . $script:funcPath
 
         $path = Join-Path -Path $script:tmpDir -ChildPath 'app-PROD-SEARCH2-ContentDBs.json'
@@ -48,6 +48,8 @@ Describe 'Initialize-SPSContentDbJsonFile - no content database (search farm)' {
 Describe 'Initialize-SPSContentDbJsonFile - with content databases' {
     It 'balances every database across the four sequences without loss' {
         function Get-SPContentDatabase {
+            [CmdletBinding()]
+            param()
             $mk = {
                 param($n, $sz, $url)
                 [pscustomobject]@{
@@ -76,5 +78,16 @@ Describe 'Initialize-SPSContentDbJsonFile - with content databases' {
         $names | Should -Contain 'DB_Big'
         $names | Should -Contain 'DB_Mid'
         $names | Should -Contain 'DB_Small'
+    }
+}
+
+Describe 'Initialize-SPSContentDbJsonFile - content database query failure' {
+    It 'throws and does not write a misleading empty inventory when the query fails' {
+        function Get-SPContentDatabase { [CmdletBinding()] param() throw 'SharePoint farm is unavailable' }
+        . $script:funcPath
+
+        $path = Join-Path -Path $script:tmpDir -ChildPath 'app-PROD-FAIL-ContentDBs.json'
+        { Initialize-SPSContentDbJsonFile -Path $path 6> $null } | Should -Throw
+        Test-Path -Path $path | Should -BeFalse
     }
 }

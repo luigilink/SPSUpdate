@@ -26,8 +26,17 @@
         [System.Double]$SizeInMB
     }
 
-    #Get all content databases
-    $spAllDatabases = Get-SPContentDatabase -ErrorAction SilentlyContinue
+    # Get all content databases. Use -ErrorAction Stop so a genuine query failure
+    # (SharePoint unavailable, access denied, ...) is not silently swallowed and
+    # misreported as a zero-database farm: it throws, the caller catches it and the run
+    # fails closed instead of skipping the mount/upgrade sequences. A real search farm
+    # simply returns no databases (no error), which is handled by the else branch below.
+    try {
+        $spAllDatabases = Get-SPContentDatabase -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to enumerate content databases while initializing the inventory: $($_.Exception.Message)"
+    }
 
     if ($null -ne $spAllDatabases) {
         # --- LPT (Longest Processing Time First) scheduling ---
