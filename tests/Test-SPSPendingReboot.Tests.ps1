@@ -48,4 +48,38 @@ Describe 'Test-SPSPendingReboot' {
         $result.IsPending | Should -BeTrue
         $result.Reasons | Should -Contain 'PendingFileRenameOperations'
     }
+
+    It 'aggregates multiple reboot reasons at once' {
+        Mock -CommandName Get-ChildItem -ModuleName SPSUpdate.Common -MockWith { @() }
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith { $null }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $false }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $true } -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+        }
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $true } -ParameterFilter {
+            $Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+        }
+
+        $result = Test-SPSPendingReboot
+        $result.IsPending | Should -BeTrue
+        $result.Reasons | Should -Contain 'WindowsUpdateRebootRequired'
+        $result.Reasons | Should -Contain 'ComponentBasedServicingRebootPending'
+        @($result.Reasons).Count | Should -BeGreaterOrEqual 2
+    }
+
+    It 'flags a pending computer rename when the active and pending names differ' {
+        Mock -CommandName Test-Path -ModuleName SPSUpdate.Common -MockWith { $false }
+        Mock -CommandName Get-ChildItem -ModuleName SPSUpdate.Common -MockWith { @() }
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith { $null }
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith {
+            [PSCustomObject]@{ ComputerName = 'OLDNAME' }
+        } -ParameterFilter { $Path -eq 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' }
+        Mock -CommandName Get-ItemProperty -ModuleName SPSUpdate.Common -MockWith {
+            [PSCustomObject]@{ ComputerName = 'NEWNAME' }
+        } -ParameterFilter { $Path -eq 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' }
+
+        $result = Test-SPSPendingReboot
+        $result.IsPending | Should -BeTrue
+        $result.Reasons | Should -Contain 'PendingComputerRename'
+    }
 }
