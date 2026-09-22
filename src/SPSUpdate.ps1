@@ -252,7 +252,7 @@ $statusDashboardPath = if ($null -ne $statusCampaignPath) { Join-Path -Path $sta
 function Write-SPSStatus {
     param(
         [Parameter(Mandatory = $true)][System.String] $Scope,
-        [Parameter(Mandatory = $true)][ValidateSet('ProductUpdate', 'Mount', 'Upgrade', 'Sequence', 'Wizard', 'SideBySide')][System.String] $Phase,
+        [Parameter(Mandatory = $true)][ValidateSet('ProductUpdate', 'Reboot', 'Mount', 'Upgrade', 'Sequence', 'Wizard', 'SideBySide')][System.String] $Phase,
         [System.String] $Server = $thisServer,
         [System.String] $State,
         [System.String] $Detail,
@@ -299,6 +299,30 @@ function Write-SPSDashboard {
     }
 }
 
+# Local helper: resolve the per-server reboot marker paths (a ".done" guard and a ".pending"
+# deferred-request marker) in the campaign folder. Returns $null when no status store is set.
+function Get-SPSRebootMarkerPath {
+    param([Parameter(Mandatory = $true)][ValidateSet('done', 'pending')][System.String] $Kind)
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return $null }
+    return Join-Path -Path $statusCampaignPath -ChildPath "reboot-$($thisServer).$Kind.marker"
+}
+
+# Local helper: safely resolve a Schedule block ({ Days, Time }) to its two values. Throws
+# when a Schedule is supplied but is not a hashtable/dictionary, so a malformed but truthy
+# value (for example the string 'weekend') fails closed instead of being read as "no
+# restriction". Returns $null Days/Time when no schedule is configured.
+function Resolve-SPSScheduleValue {
+    param([Parameter()] $Schedule, [Parameter(Mandatory = $true)][System.String] $Label)
+    $result = @{ Days = $null; Time = $null }
+    if ($null -eq $Schedule) { return $result }
+    if ($Schedule -isnot [System.Collections.IDictionary]) {
+        throw "$Label must be a hashtable with optional 'Days' and 'Time' keys, not '$($Schedule.GetType().Name)'."
+    }
+    if ($Schedule.Contains('Days')) { $result.Days = $Schedule['Days'] }
+    if ($Schedule.Contains('Time')) { $result.Time = $Schedule['Time'] }
+    return $result
+}
+
 # Local helper: perform the optional automatic reboot after a CU install. Opt-in via the
 # Reboot config block. A reboot is warranted when the installer requested one (exit code
 # 17022), when a previous run deferred one (outside the reboot window), or when Reboot.Force
@@ -307,9 +331,10 @@ function Write-SPSDashboard {
 # carry a deferred request across runs. Just before rebooting, a one-shot boot-triggered task
 # is registered to stamp the reboot Done (Action ConfirmReboot) and self-delete; if it cannot
 # be registered the reboot is aborted (fail closed) so the dashboard never stays stuck on
-# Running. Honors -WhatIf via ShouldProcess.
+# Running. ConfirmImpact is Medium so an unattended run is not blocked on a prompt (the config
+# Reboot.Enable is the explicit opt-in); -WhatIf still forces a dry run.
 function Invoke-SPSAutomaticReboot {
-    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory = $true)][System.Boolean] $RebootRequired,
         [Parameter()][System.Boolean] $InstallPerformed = $false
@@ -323,14 +348,9 @@ function Invoke-SPSAutomaticReboot {
     # Campaign markers: a ".done" guard (one reboot per campaign) and a ".pending" request
     # persisted when a reboot is required but deferred (outside the window). ResetStatus
     # clears the campaign folder, so both are scoped to the current patching round.
-    $rebootDoneMarker = $null
-    $rebootPendingMarker = $null
-    $hasPending = $false
-    if (-not [string]::IsNullOrEmpty($statusCampaignPath)) {
-        $rebootDoneMarker = Join-Path -Path $statusCampaignPath -ChildPath "reboot-$($thisServer).done.marker"
-        $rebootPendingMarker = Join-Path -Path $statusCampaignPath -ChildPath "reboot-$($thisServer).pending.marker"
-        $hasPending = Test-Path -Path $rebootPendingMarker
-    }
+    $rebootDoneMarker = Get-SPSRebootMarkerPath -Kind 'done'
+    $rebootPendingMarker = Get-SPSRebootMarkerPath -Kind 'pending'
+    $hasPending = ($null -ne $rebootPendingMarker) -and (Test-Path -Path $rebootPendingMarker)
 
     # Reboot-once guard.
     if ($null -ne $rebootDoneMarker -and (Test-Path -Path $rebootDoneMarker)) {
@@ -352,10 +372,9 @@ function Invoke-SPSAutomaticReboot {
     }
 
     # Schedule gate: outside the optional reboot window, persist the request and defer.
-    $schedDays = if ($rebootCfg.ContainsKey('Schedule') -and $rebootCfg.Schedule) { $rebootCfg.Schedule.Days } else { $null }
-    $schedTime = if ($rebootCfg.ContainsKey('Schedule') -and $rebootCfg.Schedule) { $rebootCfg.Schedule.Time } else { $null }
+    $rebootSchedule = Resolve-SPSScheduleValue -Schedule $rebootCfg.Schedule -Label 'Reboot.Schedule'
     try {
-        $inWindow = Test-SPSScheduleWindow -Days $schedDays -Time $schedTime
+        $inWindow = Test-SPSScheduleWindow -Days $rebootSchedule.Days -Time $rebootSchedule.Time
     }
     catch {
         $catchMessage = "Invalid Reboot.Schedule window on $($thisServer): $($_.Exception.Message)"
@@ -420,7 +439,8 @@ function Invoke-SPSAutomaticReboot {
     }
 
     # Mark the reboot as launched, log it, write the guard marker, clear any pending request,
-    # then reboot.
+    # then reboot. If the restart itself fails, roll back the guard and the pending request so
+    # a later run can retry, remove the confirmation task, and surface the failure.
     Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Running' -Detail 'Automatic Reboot launched, check the server in a few minutes'
     Write-SPSDashboard
     Add-SPSUpdateEvent -Message "Automatic reboot launched on $thisServer after the CU install. The server will restart now." -Source 'Restart-SPSServer' -EntryType 'Warning' -EventID 3010
@@ -430,11 +450,35 @@ function Invoke-SPSAutomaticReboot {
     if ($null -ne $rebootPendingMarker -and (Test-Path -Path $rebootPendingMarker)) {
         Remove-Item -Path $rebootPendingMarker -Force -ErrorAction SilentlyContinue
     }
-    if ($script:TranscriptStarted) {
-        Stop-Transcript | Out-Null
-        $script:TranscriptStarted = $false
+    try {
+        Restart-Computer -Force -ErrorAction Stop
+        # Restart initiated: stop the transcript so the log file is not locked during shutdown.
+        if ($script:TranscriptStarted) {
+            Stop-Transcript | Out-Null
+            $script:TranscriptStarted = $false
+        }
     }
-    Restart-Computer -Force
+    catch {
+        # The restart did not start: roll back the guard so a later run retries, restore the
+        # pending request, remove the confirmation task, and mark the reboot Failed.
+        if ($null -ne $rebootDoneMarker -and (Test-Path -Path $rebootDoneMarker)) {
+            Remove-Item -Path $rebootDoneMarker -Force -ErrorAction SilentlyContinue
+        }
+        if ($null -ne $rebootPendingMarker) {
+            Set-Content -Path $rebootPendingMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue
+        }
+        try {
+            Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
+        }
+        catch {
+            Write-Warning -Message "Could not remove the reboot-confirm task after a failed restart: $($_.Exception.Message)"
+        }
+        $catchMessage = "Restart-Computer failed on $($thisServer): $($_.Exception.Message) The reboot request was kept for a later retry."
+        Write-Error -Message $catchMessage
+        Add-SPSUpdateEvent -Message $catchMessage -Source 'Restart-SPSServer' -EntryType 'Error'
+        Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Failed' -Detail 'Restart-Computer failed; the reboot will be retried on the next run'
+        Write-SPSDashboard
+    }
 }
 
 # Local helper: (re)generate the ContentDatabase inventory HTML report from the JSON
@@ -870,14 +914,15 @@ Exception: $_
     'ProductUpdate' {
         # Optional install schedule gate (Binaries.Schedule). Outside the window, skip the
         # install entirely and fail closed on a malformed window.
-        $installDays = if ($envCfg.Binaries.ContainsKey('Schedule') -and $envCfg.Binaries.Schedule) { $envCfg.Binaries.Schedule.Days } else { $null }
-        $installTime = if ($envCfg.Binaries.ContainsKey('Schedule') -and $envCfg.Binaries.Schedule) { $envCfg.Binaries.Schedule.Time } else { $null }
         $installAllowed = $true
+        $installScheduleValid = $true
         try {
-            $installAllowed = Test-SPSScheduleWindow -Days $installDays -Time $installTime
+            $installSchedule = Resolve-SPSScheduleValue -Schedule $envCfg.Binaries.Schedule -Label 'Binaries.Schedule'
+            $installAllowed = Test-SPSScheduleWindow -Days $installSchedule.Days -Time $installSchedule.Time
         }
         catch {
             $installAllowed = $false
+            $installScheduleValid = $false
             $catchMessage = "Invalid Binaries.Schedule window: $($_.Exception.Message)"
             Write-Error -Message $catchMessage
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
@@ -886,6 +931,12 @@ Exception: $_
             Write-Output 'Binary install is outside the configured Binaries.Schedule window; skipping ProductUpdate on this server.'
             Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Skipped' -Detail 'Outside the configured install window'
             Write-SPSDashboard
+            # Still honor a previously deferred reboot when the install schedule was valid
+            # (just outside its window) - for independent install/reboot windows. A malformed
+            # install schedule stays fail-closed and does not process a reboot.
+            if ($installScheduleValid) {
+                Invoke-SPSAutomaticReboot -RebootRequired $false -InstallPerformed $false
+            }
         }
         else {
             # Run ProductUpdate
@@ -926,7 +977,18 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                     # Track a genuine install (exit 0 or 17022) so Reboot.Force only reboots
                     # when something was actually installed, not on an already-patched server.
                     if ([int]$puExitCode -eq 0 -or [int]$puExitCode -eq 17022) { $installPerformed = $true }
-                    if ([int]$puExitCode -eq 17022) { $rebootRequired = $true }
+                    if ([int]$puExitCode -eq 17022) {
+                        $rebootRequired = $true
+                        # Persist the reboot request immediately (before any later package in
+                        # the loop can fail), so a required reboot is never lost: on retry the
+                        # first package reports "already installed" and no longer returns 17022.
+                        if ($envCfg.Reboot.Enable) {
+                            $pendingMarkerPath = Get-SPSRebootMarkerPath -Kind 'pending'
+                            if ($null -ne $pendingMarkerPath) {
+                                Set-Content -Path $pendingMarkerPath -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue
+                            }
+                        }
+                    }
                     Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail $puDetail -ExitCode ([int]$puExitCode)
                 }
                 Write-SPSDashboard
