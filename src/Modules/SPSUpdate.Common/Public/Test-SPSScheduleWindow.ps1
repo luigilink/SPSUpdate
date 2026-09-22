@@ -63,11 +63,28 @@
 
     # Day-of-week gate.
     if ($null -ne $Days -and $Days.Count -gt 0) {
+        # Map accepted day names (short and full) to canonical short names. Reject any other
+        # non-blank value instead of truncating it (truncating would let 'saturn' open the
+        # window on Saturday, i.e. fail open on malformed config).
+        $dayMap = @{
+            'mon' = 'mon'; 'monday' = 'mon'
+            'tue' = 'tue'; 'tuesday' = 'tue'
+            'wed' = 'wed'; 'wednesday' = 'wed'
+            'thu' = 'thu'; 'thursday' = 'thu'
+            'fri' = 'fri'; 'friday' = 'fri'
+            'sat' = 'sat'; 'saturday' = 'sat'
+            'sun' = 'sun'; 'sunday' = 'sun'
+        }
         $currentDay = $Now.DayOfWeek.ToString().ToLower().Substring(0, 3)
-        $allowedDays = @($Days | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
-                $trimmed = $_.Trim().ToLower()
-                $trimmed.Substring(0, [System.Math]::Min(3, $trimmed.Length))
-            })
+        $allowedDays = @()
+        foreach ($day in $Days) {
+            if ([string]::IsNullOrWhiteSpace($day)) { continue }
+            $key = $day.Trim().ToLower()
+            if (-not $dayMap.ContainsKey($key)) {
+                throw "Invalid schedule day name: '$day'. Expected one of mon, tue, wed, thu, fri, sat, sun (short or full names)."
+            }
+            $allowedDays += $dayMap[$key]
+        }
         if ($allowedDays -notcontains $currentDay) {
             return $false
         }

@@ -54,7 +54,7 @@
     https://spjc.fr/
     https://github.com/luigilink/SPSUpdate
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true)]
 param
 (
     [Parameter(Position = 0, Mandatory = $true)]
@@ -182,8 +182,14 @@ function Get-SPSUpdateConfiguration {
     if (-not $config.Reboot.ContainsKey('Enable')) {
         $config.Reboot.Enable = $false
     }
+    elseif ($config.Reboot.Enable -isnot [bool]) {
+        throw "Configuration property 'Reboot.Enable' must be a Boolean (`$true or `$false), not '$($config.Reboot.Enable)'."
+    }
     if (-not $config.Reboot.ContainsKey('Force')) {
         $config.Reboot.Force = $false
+    }
+    elseif ($config.Reboot.Force -isnot [bool]) {
+        throw "Configuration property 'Reboot.Force' must be a Boolean (`$true or `$false), not '$($config.Reboot.Force)'."
     }
 
     # StatusStorePath is optional; empty string means "use the local Results\status folder".
@@ -219,6 +225,9 @@ $pathLogsFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Logs'
 $pathConfigFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Config'
 $pathResultsFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Results'
 $fullScriptPath = Join-Path -Path $PSScriptRoot -ChildPath 'SPSUpdate.ps1'
+# Resolve the config file to an absolute path so it can be embedded in the boot-triggered
+# reboot-confirm task, which Task Scheduler starts without the caller's working directory.
+$resolvedConfigFile = try { (Resolve-Path -LiteralPath $ConfigFile -ErrorAction Stop).Path } catch { $ConfigFile }
 $spsUpdateDBsPath = Join-Path -Path $pathConfigFolder -ChildPath $spsUpdateDBsFile
 $spsUpdateDbReportPath = Join-Path -Path $pathResultsFolder -ChildPath $spsUpdateDbReportFile
 
@@ -358,7 +367,7 @@ function Invoke-SPSAutomaticReboot {
     try {
         $rebootCredential = Get-SPSSecret -CredentialKey $envCfg.CredentialKey -ConfigPath $pathConfigFolder
         if ($null -ne $rebootCredential) {
-            $confirmArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($ConfigFile)`" -Action ConfirmReboot"
+            $confirmArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($resolvedConfigFile)`" -Action ConfirmReboot"
             $existingConfirm = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
             if ($null -ne $existingConfirm) {
                 Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
@@ -814,11 +823,31 @@ Exception: $_
         }
     }
     'ProductUpdate' {
-        # Run ProductUpdate
-        Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Running' -Detail "Installing $(@($envCfg.Binaries.SetupFileName).Count) update(s)"
-        Write-SPSDashboard
-        $rebootRequired = $false
+        # Optional install schedule gate (Binaries.Schedule). Outside the window, skip the
+        # install entirely and fail closed on a malformed window.
+        $installDays = if ($envCfg.Binaries.ContainsKey('Schedule') -and $envCfg.Binaries.Schedule) { $envCfg.Binaries.Schedule.Days } else { $null }
+        $installTime = if ($envCfg.Binaries.ContainsKey('Schedule') -and $envCfg.Binaries.Schedule) { $envCfg.Binaries.Schedule.Time } else { $null }
+        $installAllowed = $true
         try {
+            $installAllowed = Test-SPSScheduleWindow -Days $installDays -Time $installTime
+        }
+        catch {
+            $installAllowed = $false
+            $catchMessage = "Invalid Binaries.Schedule window: $($_.Exception.Message)"
+            Write-Error -Message $catchMessage
+            Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+        }
+        if (-not $installAllowed) {
+            Write-Output 'Binary install is outside the configured Binaries.Schedule window; skipping ProductUpdate on this server.'
+            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Skipped' -Detail 'Outside the configured install window'
+            Write-SPSDashboard
+        }
+        else {
+            # Run ProductUpdate
+            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Running' -Detail "Installing $(@($envCfg.Binaries.SetupFileName).Count) update(s)"
+            Write-SPSDashboard
+            $rebootRequired = $false
+            try {
             foreach ($setupFile in $envCfg.Binaries.SetupFileName) {
                 $fullSetupFilePath = Join-Path -Path $envCfg.Binaries.SetupFullPath -ChildPath $setupFile
                 $spTargetServer = ([System.Net.Dns]::GetHostByName($env:COMPUTERNAME).HostName).ToString()
@@ -876,6 +905,7 @@ Exception: $_
                 $script:TranscriptStarted = $false
             }
             exit
+            }
         }
     }
     Default {

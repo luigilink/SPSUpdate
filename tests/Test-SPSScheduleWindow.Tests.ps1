@@ -59,4 +59,9 @@ Describe 'Test-SPSScheduleWindow' {
     It 'throws when the start is later than the end (crossing midnight)' {
         { Test-SPSScheduleWindow -Time '11:00 PM to 1:00 AM' -Now $script:sat0300 } | Should -Throw
     }
+
+    It 'throws on an invalid day name instead of truncating it' {
+        # 'saturn' must not be silently accepted as Saturday.
+        { Test-SPSScheduleWindow -Days @('saturn') -Now $script:sat0300 } | Should -Throw
+    }
 }
