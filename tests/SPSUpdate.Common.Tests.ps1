@@ -63,6 +63,7 @@ Describe 'SPSUpdate.Common module' {
             'Start-SPSProductUpdate'
             'Start-SPSScheduledTask'
             'Test-SPSPendingReboot'
+            'Test-SPSScheduleWindow'
             'Update-SPSContentDatabase'
         )
         $actual = (Get-Command -Module SPSUpdate.Common -CommandType Function).Name | Sort-Object
