@@ -63,7 +63,7 @@ param
     $ConfigFile, # Path to the configuration file
 
     [Parameter(Position = 1)]
-    [validateSet('Install', 'Uninstall', 'Default', 'ProductUpdate', 'InitContentDB', 'ResetStatus', IgnoreCase = $true)]
+    [validateSet('Install', 'Uninstall', 'Default', 'ProductUpdate', 'InitContentDB', 'ResetStatus', 'ConfirmReboot', IgnoreCase = $true)]
     [System.String]
     $Action = 'Default',
 
@@ -109,6 +109,7 @@ if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 # Define task name constants
 $script:TaskNameFullScript = 'SPSUpdate-FullScript'
 $script:TaskNameSequencePrefix = 'SPSUpdate-Sequence'
+$script:TaskNameRebootConfirm = 'SPSUpdate-RebootConfirm'
 $script:TaskPath = 'SharePoint'
 
 # Function to load, validate and normalize the psd1 configuration file.
@@ -328,6 +329,9 @@ elseif ($PSBoundParameters.ContainsKey('Action') -and $Action -eq 'ProductUpdate
 elseif ($PSBoundParameters.ContainsKey('Action') -and $Action -eq 'InitContentDB') {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_InitContentDB-$($env:COMPUTERNAME)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
 }
+elseif ($PSBoundParameters.ContainsKey('Action') -and $Action -eq 'ConfirmReboot') {
+    $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ("$($Application)-$($Environment)_ConfirmReboot-$($env:COMPUTERNAME)_" + (Get-Date -Format yyyy-MM-dd_H-mm) + '.log')
+}
 else {
     $pathLogFile = Join-Path -Path $pathLogsFolder -ChildPath ($spsUpdateFileName + '.log')
 }
@@ -360,22 +364,26 @@ Write-Output '-----------------------------------------------'
 Write-Verbose -Message "Setting power management plan to 'High Performance'..."
 Start-Process -FilePath "$env:SystemRoot\system32\powercfg.exe" -ArgumentList '/s 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' -NoNewWindow
 
-# 1. Load the SharePointServer module (SharePoint Server Subscription Edition)
-try {
-    $installedVersion = Get-SPSInstalledProductVersion
-    Write-Output "Installed SharePoint Product Version: $($installedVersion.FileVersion)"
-    if ($null -eq (Get-Module -Name SharePointServer)) {
-        Import-Module SharePointServer -Verbose:$false -WarningAction SilentlyContinue
+# 1. Load the SharePointServer module (SharePoint Server Subscription Edition).
+# Skipped for status-only actions (ResetStatus, ConfirmReboot) that never touch the farm
+# and may run at boot time before SharePoint is fully ready.
+if ($Action -ne 'ResetStatus' -and $Action -ne 'ConfirmReboot') {
+    try {
+        $installedVersion = Get-SPSInstalledProductVersion
+        Write-Output "Installed SharePoint Product Version: $($installedVersion.FileVersion)"
+        if ($null -eq (Get-Module -Name SharePointServer)) {
+            Import-Module SharePointServer -Verbose:$false -WarningAction SilentlyContinue
+        }
     }
-}
-catch {
-    # Handle errors during retrieval of Installed Product Version
-    $catchMessage = @"
+    catch {
+        # Handle errors during retrieval of Installed Product Version
+        $catchMessage = @"
 Failed to get installed Product Version for $($env:COMPUTERNAME)
 Exception: $_
 "@
-    Write-Error -Message $catchMessage
-    Add-SPSUpdateEvent -Message $catchMessage -Source 'Get-SPSInstalledProductVersion' -EntryType 'Error'
+        Write-Error -Message $catchMessage
+        Add-SPSUpdateEvent -Message $catchMessage -Source 'Get-SPSInstalledProductVersion' -EntryType 'Error'
+    }
 }
 
 # 2. For the Default action only (full run on the master + each -Sequence sub-run),
@@ -475,6 +483,41 @@ Exception: $_
 "@
             Write-Error -Message $catchMessage
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Set-SPSUpdateStatus' -EntryType 'Error'
+        }
+    }
+    'ConfirmReboot' {
+        # Status-only action run at boot by the one-shot SPSUpdate-RebootConfirm task that
+        # was registered just before an automatic reboot. It stamps the local server's
+        # reboot as Done on the live dashboard, logs the completion, then removes the
+        # one-shot task so it never runs again. It never touches SharePoint or patching.
+        try {
+            if ([string]::IsNullOrEmpty($statusCampaignPath)) {
+                Write-Warning -Message 'No status store campaign path resolved; cannot confirm the reboot.'
+            }
+            else {
+                Write-Output "Confirming automatic reboot completion for server: $thisServer"
+                Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Done' -Detail 'Server back online after automatic reboot'
+                Write-SPSDashboard
+                Add-SPSUpdateEvent -Message "Automatic reboot completed on $thisServer - server is back online." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
+            }
+        }
+        catch {
+            $catchMessage = @"
+Failed to confirm the automatic reboot for server: $($thisServer)
+Exception: $_
+"@
+            Write-Error -Message $catchMessage
+            Add-SPSUpdateEvent -Message $catchMessage -Source 'Restart-SPSServer' -EntryType 'Error'
+        }
+        finally {
+            # Always remove the one-shot confirmation task, even if the status update failed,
+            # so it can never re-run on subsequent boots.
+            try {
+                Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
+            }
+            catch {
+                Write-Warning -Message "Could not remove the reboot-confirm task '$script:TaskNameRebootConfirm': $($_.Exception.Message)"
+            }
         }
     }
     'InitContentDB' {
