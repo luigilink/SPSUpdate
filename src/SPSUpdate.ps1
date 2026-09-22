@@ -371,9 +371,11 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
-    # Schedule gate: outside the optional reboot window, persist the request and defer.
-    $rebootSchedule = Resolve-SPSScheduleValue -Schedule $rebootCfg.Schedule -Label 'Reboot.Schedule'
+    # Schedule gate: outside the optional reboot window, persist the request and defer. The
+    # schedule shape is resolved inside the try so a malformed Reboot.Schedule is reported as
+    # Reboot=Failed rather than terminating the script.
     try {
+        $rebootSchedule = Resolve-SPSScheduleValue -Schedule $rebootCfg.Schedule -Label 'Reboot.Schedule'
         $inWindow = Test-SPSScheduleWindow -Days $rebootSchedule.Days -Time $rebootSchedule.Time
     }
     catch {
@@ -982,10 +984,19 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                         # Persist the reboot request immediately (before any later package in
                         # the loop can fail), so a required reboot is never lost: on retry the
                         # first package reports "already installed" and no longer returns 17022.
+                        # A write failure here is surfaced (not suppressed) because this marker
+                        # is the durable record that protects the request across runs.
                         if ($envCfg.Reboot.Enable) {
                             $pendingMarkerPath = Get-SPSRebootMarkerPath -Kind 'pending'
                             if ($null -ne $pendingMarkerPath) {
-                                Set-Content -Path $pendingMarkerPath -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue
+                                try {
+                                    Set-Content -Path $pendingMarkerPath -Value (Get-Date -Format o) -Force -ErrorAction Stop
+                                }
+                                catch {
+                                    $markerMessage = "Could not persist the reboot request marker '$pendingMarkerPath' on $($thisServer): $($_.Exception.Message) If a later package fails, the required reboot may be lost - reboot the server manually."
+                                    Write-Warning -Message $markerMessage
+                                    Add-SPSUpdateEvent -Message $markerMessage -Source 'Restart-SPSServer' -EntryType 'Warning' -EventID 3010
+                                }
                             }
                         }
                     }

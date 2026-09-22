@@ -93,5 +93,8 @@ ActionArguments: $($ActionArguments)
 Exception: $($_.Exception.Message)
 "@
         Write-Error -Message $catchMessage # Handle any errors during task registration
+        # Rethrow so callers can treat a failed registration as terminating instead of
+        # relying on a later existence check (which could see a stale task and proceed).
+        throw $catchMessage
     }
 }
