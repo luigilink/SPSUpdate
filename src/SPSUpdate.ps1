@@ -684,33 +684,51 @@ Exception: $_
         # reboot as Done on the live dashboard, logs the completion, then removes the
         # one-shot task so it never runs again. It never touches SharePoint or patching.
         $rebootConfirmed = $false
+        $rebootStale = $false
         try {
             if ([string]::IsNullOrEmpty($statusCampaignPath)) {
                 Write-Warning -Message 'No status store campaign path resolved; cannot confirm the reboot.'
             }
             else {
-                Write-Output "Confirming automatic reboot completion for server: $thisServer"
-                # Bounded retry: the status store may be a UNC share that is briefly
-                # unavailable at boot. Verify Reboot=Done actually persisted (read it back)
-                # before neutralizing the task, so a transient failure does not strand the
-                # dashboard at Running with no way to recover.
-                for ($attempt = 1; $attempt -le 5 -and -not $rebootConfirmed; $attempt++) {
-                    Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Done' -Detail 'Server back online after automatic reboot'
-                    $persisted = @(Get-SPSUpdateStatus -CampaignPath $statusCampaignPath -ErrorAction SilentlyContinue |
-                            Where-Object { $_.Phase -eq 'Reboot' -and $_.Server -eq $thisServer -and $_.State -eq 'Done' })
-                    if ($persisted.Count -gt 0) {
-                        $rebootConfirmed = $true
-                        break
-                    }
-                    Start-Sleep -Seconds 5
+                # Only stamp Done for a campaign that actually launched this reboot: require the
+                # current campaign's reboot ".done" guard marker. This prevents a stale confirm
+                # task (left enabled after a boot could not reach the status store) from marking
+                # a later, reset campaign complete, and prevents a manual ConfirmReboot from
+                # stamping Done when no reboot happened.
+                $rebootDoneMarker = Get-SPSRebootMarkerPath -Kind 'done'
+                $campaignReachable = Test-Path -Path $statusCampaignPath -ErrorAction SilentlyContinue
+                if (-not $campaignReachable) {
+                    Write-Warning -Message "Status store campaign folder is unreachable on $thisServer; leaving the confirmation task to retry on the next boot."
                 }
-                if ($rebootConfirmed) {
-                    Write-SPSDashboard
-                    Add-SPSUpdateEvent -Message "Automatic reboot completed on $thisServer - server is back online." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
+                elseif ($null -eq $rebootDoneMarker -or -not (Test-Path -Path $rebootDoneMarker)) {
+                    Write-Warning -Message "No reboot guard marker for the current campaign on $thisServer; this reboot-confirmation task is stale and will be removed without recording completion."
+                    Add-SPSUpdateEvent -Message "Stale reboot-confirm task on $thisServer removed without recording completion (no current-campaign reboot marker)." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                    $rebootStale = $true
                 }
                 else {
-                    Write-Warning -Message "Could not persist Reboot=Done for $thisServer after several attempts; leaving the confirmation task in place to retry on the next boot."
-                    Add-SPSUpdateEvent -Message "Could not persist the reboot completion status for $thisServer; the confirmation task will retry on the next boot." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                    Write-Output "Confirming automatic reboot completion for server: $thisServer"
+                    # Bounded retry: the status store may be a UNC share that is briefly
+                    # unavailable at boot. Verify Reboot=Done actually persisted (read it back)
+                    # before neutralizing the task, so a transient failure does not strand the
+                    # dashboard at Running with no way to recover.
+                    for ($attempt = 1; $attempt -le 5 -and -not $rebootConfirmed; $attempt++) {
+                        Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Done' -Detail 'Server back online after automatic reboot'
+                        $persisted = @(Get-SPSUpdateStatus -CampaignPath $statusCampaignPath -ErrorAction SilentlyContinue |
+                                Where-Object { $_.Phase -eq 'Reboot' -and $_.Server -eq $thisServer -and $_.State -eq 'Done' })
+                        if ($persisted.Count -gt 0) {
+                            $rebootConfirmed = $true
+                            break
+                        }
+                        Start-Sleep -Seconds 5
+                    }
+                    if ($rebootConfirmed) {
+                        Write-SPSDashboard
+                        Add-SPSUpdateEvent -Message "Automatic reboot completed on $thisServer - server is back online." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
+                    }
+                    else {
+                        Write-Warning -Message "Could not persist Reboot=Done for $thisServer after several attempts; leaving the confirmation task in place to retry on the next boot."
+                        Add-SPSUpdateEvent -Message "Could not persist the reboot completion status for $thisServer; the confirmation task will retry on the next boot." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                    }
                 }
             }
         }
@@ -723,12 +741,13 @@ Exception: $_
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Restart-SPSServer' -EntryType 'Error'
         }
         finally {
-            # Only neutralize the one-shot confirmation task once completion is confirmed, so
-            # a transient status-store failure does not strand the dashboard at Running: the
-            # task simply retries on the next boot instead. Remove-SPSScheduledTask swallows a
-            # delete failure internally, so verify the task is actually gone; if it is still
-            # present, disable it and verify the disable actually took effect.
-            if ($rebootConfirmed) {
+            # Neutralize the one-shot confirmation task when the reboot was confirmed for the
+            # current campaign, or when this task is stale (its campaign was reset / no guard
+            # marker). A transient status-store failure leaves it in place to retry next boot.
+            # Remove-SPSScheduledTask swallows a delete failure internally, so verify the task
+            # is actually gone; if it is still present, disable it and verify the disable took
+            # effect.
+            if ($rebootConfirmed -or $rebootStale) {
                 try {
                     Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
                     $stillThere = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
