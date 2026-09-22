@@ -179,3 +179,24 @@ Describe 'Export-SPSUpdateProgressReport (server reboot phase)' {
         $rbIndex | Should -BeGreaterThan $puIndex
     }
 }
+
+Describe 'Export-SPSUpdateProgressReport (completed run with a pending reboot)' {
+    It 'does not report the overall state as Done while a reboot is still pending' {
+        $camp = New-Campaign -Name 'reboot-pending'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Item 'uber.exe' -ItemState 'Done' -ExitCode 17022 -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP1' -State 'Pending' -Detail 'Reboot required - waiting for the scheduled reboot window' -Confirm:$false | Out-Null
+        # Even with -Completed, the overall card must stay active (not Done) because the
+        # reboot has not happened yet.
+        $h = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $camp -Completed) -Raw
+        $h | Should -Match 'class="badge Running"'
+    }
+
+    It 'reports Done once the reboot scope is Done' {
+        $camp = New-Campaign -Name 'reboot-done'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Item 'uber.exe' -ItemState 'Done' -ExitCode 17022 -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP1' -State 'Done' -Detail 'Server back online after automatic reboot' -Confirm:$false | Out-Null
+        $h = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $camp -Completed) -Raw
+        $h | Should -Match 'Campaign completed'
+        $h | Should -Not -Match 'class="badge Failed"'
+    }
+}

@@ -143,7 +143,11 @@
     elseif ($hasActive) { 'Running' }
     elseif ($hasWarning) { 'Warning' }
     else { 'Done' }
-    if ($Completed -and $overall -eq 'Running') { $overall = 'Done' }
+    # A completed master run may mark the overall state Done, but never while a server reboot
+    # is still Pending (deferred, waiting for its window) or Running (awaiting confirmation):
+    # those must keep the overall state active so a pending/running reboot is not hidden.
+    $rebootActive = @($scopes | Where-Object { $_.Phase -eq 'Reboot' -and ($_.State -eq 'Pending' -or $_.State -eq 'Running') }).Count -gt 0
+    if ($Completed -and $overall -eq 'Running' -and -not $rebootActive) { $overall = 'Done' }
 
     $serverCount = @($scopes | Select-Object -ExpandProperty Server -Unique | Where-Object { $_ }).Count
 

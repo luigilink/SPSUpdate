@@ -300,16 +300,19 @@ function Write-SPSDashboard {
 }
 
 # Local helper: perform the optional automatic reboot after a CU install. Opt-in via the
-# Reboot config block. The reboot is triggered ONLY by the installer "reboot required"
-# exit code (17022), unless Reboot.Force is set. A per-server marker in the campaign folder
-# guarantees a single reboot per campaign, and the reboot only happens inside the optional
-# Reboot.Schedule window. Just before rebooting, a one-shot boot-triggered task is
-# registered to stamp the reboot as Done on the dashboard (Action ConfirmReboot) and
-# self-delete. Honors -WhatIf via ShouldProcess.
+# Reboot config block. A reboot is warranted when the installer requested one (exit code
+# 17022), when a previous run deferred one (outside the reboot window), or when Reboot.Force
+# is set AND an install actually ran this time. The reboot is never triggered by Windows
+# pending-reboot registry markers. Per-server campaign markers guarantee a single reboot and
+# carry a deferred request across runs. Just before rebooting, a one-shot boot-triggered task
+# is registered to stamp the reboot Done (Action ConfirmReboot) and self-delete; if it cannot
+# be registered the reboot is aborted (fail closed) so the dashboard never stays stuck on
+# Running. Honors -WhatIf via ShouldProcess.
 function Invoke-SPSAutomaticReboot {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
-        [Parameter(Mandatory = $true)][System.Boolean] $RebootRequired
+        [Parameter(Mandatory = $true)][System.Boolean] $RebootRequired,
+        [Parameter()][System.Boolean] $InstallPerformed = $false
     )
 
     $rebootCfg = $envCfg.Reboot
@@ -317,25 +320,38 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
-    if (-not $RebootRequired -and -not $rebootCfg.Force) {
-        Write-Output 'Automatic reboot is enabled but the installer did not request a reboot (and Reboot.Force is off); no reboot needed.'
+    # Campaign markers: a ".done" guard (one reboot per campaign) and a ".pending" request
+    # persisted when a reboot is required but deferred (outside the window). ResetStatus
+    # clears the campaign folder, so both are scoped to the current patching round.
+    $rebootDoneMarker = $null
+    $rebootPendingMarker = $null
+    $hasPending = $false
+    if (-not [string]::IsNullOrEmpty($statusCampaignPath)) {
+        $rebootDoneMarker = Join-Path -Path $statusCampaignPath -ChildPath "reboot-$($thisServer).done.marker"
+        $rebootPendingMarker = Join-Path -Path $statusCampaignPath -ChildPath "reboot-$($thisServer).pending.marker"
+        $hasPending = Test-Path -Path $rebootPendingMarker
+    }
+
+    # Reboot-once guard.
+    if ($null -ne $rebootDoneMarker -and (Test-Path -Path $rebootDoneMarker)) {
+        Write-Output "A reboot was already performed for $thisServer in this campaign; skipping (guard)."
+        Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Skipped' -Detail 'Already rebooted for this campaign'
+        Write-SPSDashboard
         return
     }
 
-    # Reboot-once guard: a per-server marker in the campaign folder. ResetStatus clears the
-    # campaign, so the guard is scoped to the current patching round.
-    $rebootMarker = $null
-    if (-not [string]::IsNullOrEmpty($statusCampaignPath)) {
-        $rebootMarker = Join-Path -Path $statusCampaignPath -ChildPath "reboot-$($thisServer).marker"
-        if (Test-Path -Path $rebootMarker) {
-            Write-Output "A reboot was already performed for $thisServer in this campaign; skipping (guard)."
-            Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Skipped' -Detail 'Already rebooted for this campaign'
-            Write-SPSDashboard
-            return
-        }
+    # Decide whether a reboot is warranted. Force reboots even on a successful no-reboot
+    # install (exit 0), but only when an install actually ran this time, so an already-patched
+    # server (null / exit 17025) is never rebooted just because a new campaign started.
+    $needsReboot = $RebootRequired -or $hasPending -or ($rebootCfg.Force -and $InstallPerformed)
+    if (-not $needsReboot) {
+        Write-Output "No reboot required on $thisServer (the installer did not request one)."
+        Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Skipped' -Detail 'No reboot required'
+        Write-SPSDashboard
+        return
     }
 
-    # Schedule gate: outside the optional reboot window, leave the reboot pending.
+    # Schedule gate: outside the optional reboot window, persist the request and defer.
     $schedDays = if ($rebootCfg.ContainsKey('Schedule') -and $rebootCfg.Schedule) { $rebootCfg.Schedule.Days } else { $null }
     $schedTime = if ($rebootCfg.ContainsKey('Schedule') -and $rebootCfg.Schedule) { $rebootCfg.Schedule.Time } else { $null }
     try {
@@ -350,7 +366,10 @@ function Invoke-SPSAutomaticReboot {
         return
     }
     if (-not $inWindow) {
-        Write-Output "Reboot required on $thisServer but outside the configured reboot window; leaving it pending."
+        if ($null -ne $rebootPendingMarker) {
+            Set-Content -Path $rebootPendingMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue
+        }
+        Write-Output "Reboot required on $thisServer but outside the configured reboot window; deferring until the next in-window run."
         Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Pending' -Detail 'Reboot required - waiting for the scheduled reboot window'
         Write-SPSDashboard
         return
@@ -361,38 +380,55 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
-    # Register the one-shot boot-triggered confirmation task (runs as the InstallAccount so
-    # it can write to the status store share). Failure to register is not fatal: we still
-    # reboot, the dashboard just keeps showing "Running" until the next master run.
+    # Register the one-shot boot-triggered confirmation task (runs as the InstallAccount so it
+    # can write to the status store share). This is REQUIRED: without it nothing transitions
+    # the Reboot phase from Running to Done, so a failure to register aborts the reboot and is
+    # surfaced as Failed rather than leaving the dashboard stuck on Running forever.
+    $confirmRegistered = $false
     try {
         $rebootCredential = Get-SPSSecret -CredentialKey $envCfg.CredentialKey -ConfigPath $pathConfigFolder
-        if ($null -ne $rebootCredential) {
-            $confirmArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($resolvedConfigFile)`" -Action ConfirmReboot"
-            $existingConfirm = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
-            if ($null -ne $existingConfirm) {
-                Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
-            }
-            Add-SPSScheduledTask -Name $script:TaskNameRebootConfirm `
-                -Description 'One-shot SPSUpdate task that confirms the automatic reboot completed and self-deletes.' `
-                -ActionArguments $confirmArguments `
-                -ExecuteAsCredential $rebootCredential `
-                -TaskPath $script:TaskPath `
-                -BootTrigger
+        if ($null -eq $rebootCredential) {
+            throw 'the InstallAccount secret could not be loaded to register the reboot-confirm task.'
         }
-        else {
-            Write-Warning -Message 'Could not load the InstallAccount secret; the reboot-confirm task will not be registered (dashboard will confirm on the next master run).'
+        $confirmArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($resolvedConfigFile)`" -Action ConfirmReboot"
+        $existingConfirm = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
+        if ($null -ne $existingConfirm) {
+            Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
         }
+        Add-SPSScheduledTask -Name $script:TaskNameRebootConfirm `
+            -Description 'One-shot SPSUpdate task that confirms the automatic reboot completed and self-deletes.' `
+            -ActionArguments $confirmArguments `
+            -ExecuteAsCredential $rebootCredential `
+            -TaskPath $script:TaskPath `
+            -BootTrigger
+        # Verify the task is actually registered before we commit to rebooting.
+        $verifyConfirm = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
+        if ($null -eq $verifyConfirm) {
+            throw 'the reboot-confirm task was not found after registration.'
+        }
+        $confirmRegistered = $true
     }
     catch {
-        Write-Warning -Message "Failed to register the reboot-confirm task: $($_.Exception.Message)"
+        $catchMessage = "Could not register the reboot-confirm task on $($thisServer): $($_.Exception.Message) Aborting the automatic reboot; restart the server manually."
+        Write-Error -Message $catchMessage
+        Add-SPSUpdateEvent -Message $catchMessage -Source 'Restart-SPSServer' -EntryType 'Error'
+        Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Failed' -Detail 'Could not register the reboot-confirm task; reboot aborted'
+        Write-SPSDashboard
+    }
+    if (-not $confirmRegistered) {
+        return
     }
 
-    # Mark the reboot as launched, log it, write the guard marker, then reboot.
+    # Mark the reboot as launched, log it, write the guard marker, clear any pending request,
+    # then reboot.
     Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Running' -Detail 'Automatic Reboot launched, check the server in a few minutes'
     Write-SPSDashboard
     Add-SPSUpdateEvent -Message "Automatic reboot launched on $thisServer after the CU install. The server will restart now." -Source 'Restart-SPSServer' -EntryType 'Warning' -EventID 3010
-    if ($null -ne $rebootMarker) {
-        Set-Content -Path $rebootMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue
+    if ($null -ne $rebootDoneMarker) {
+        Set-Content -Path $rebootDoneMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $rebootPendingMarker -and (Test-Path -Path $rebootPendingMarker)) {
+        Remove-Item -Path $rebootPendingMarker -Force -ErrorAction SilentlyContinue
     }
     if ($script:TranscriptStarted) {
         Stop-Transcript | Out-Null
@@ -621,10 +657,19 @@ Exception: $_
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Restart-SPSServer' -EntryType 'Error'
         }
         finally {
-            # Always remove the one-shot confirmation task, even if the status update failed,
-            # so it can never re-run on subsequent boots.
+            # Always neutralize the one-shot confirmation task, even if the status update
+            # failed, so it can never re-run on subsequent boots. Remove-SPSScheduledTask
+            # swallows a delete failure internally, so verify the task is actually gone and,
+            # if it is still present, disable it as a fallback (its boot trigger would
+            # otherwise fire on every later boot).
             try {
                 Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
+                $stillThere = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
+                if ($null -ne $stillThere) {
+                    Write-Warning -Message "The reboot-confirm task '$script:TaskNameRebootConfirm' could not be removed; disabling it so it does not run again."
+                    Disable-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue | Out-Null
+                    Add-SPSUpdateEvent -Message "The one-shot reboot-confirm task on $thisServer could not be removed and was disabled instead. Please delete task '$script:TaskNameRebootConfirm' under '\$script:TaskPath\' manually." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                }
             }
             catch {
                 Write-Warning -Message "Could not remove the reboot-confirm task '$script:TaskNameRebootConfirm': $($_.Exception.Message)"
@@ -847,6 +892,7 @@ Exception: $_
             Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Running' -Detail "Installing $(@($envCfg.Binaries.SetupFileName).Count) update(s)"
             Write-SPSDashboard
             $rebootRequired = $false
+            $installPerformed = $false
             try {
             foreach ($setupFile in $envCfg.Binaries.SetupFileName) {
                 $fullSetupFilePath = Join-Path -Path $envCfg.Binaries.SetupFullPath -ChildPath $setupFile
@@ -877,6 +923,9 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                         17025 { 'already installed' }
                         default { "installed (exit $puExitCode)" }
                     }
+                    # Track a genuine install (exit 0 or 17022) so Reboot.Force only reboots
+                    # when something was actually installed, not on an already-patched server.
+                    if ([int]$puExitCode -eq 0 -or [int]$puExitCode -eq 17022) { $installPerformed = $true }
                     if ([int]$puExitCode -eq 17022) { $rebootRequired = $true }
                     Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail $puDetail -ExitCode ([int]$puExitCode)
                 }
@@ -887,7 +936,7 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
             # Optional automatic reboot (opt-in). No-op unless Reboot.Enable is set. When a
             # reboot is performed, this stops the transcript and restarts the server, so no
             # code after this call runs on this invocation.
-            Invoke-SPSAutomaticReboot -RebootRequired $rebootRequired
+            Invoke-SPSAutomaticReboot -RebootRequired $rebootRequired -InstallPerformed $installPerformed
         }
         catch {
             # Handle errors during Run ProductUpdate
