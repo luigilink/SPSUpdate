@@ -5,8 +5,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [5.1.0] - 2026-09-22
-
 ### Added
 
 - Optional automatic reboot after a cumulative update install (opt-in via a new `Reboot` config block, off by default). The reboot is triggered only by the installer "reboot required" exit code (`17022`), never by Windows pending-reboot registry markers, so it runs at most once per patching campaign. `Reboot.Force` can reboot even when the installer did not request one. Inspired by how SharePointDsc handles reboots in PULL mode.
