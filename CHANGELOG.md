@@ -5,13 +5,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional automatic reboot after a cumulative update install (opt-in via a new `Reboot` config block, off by default). The reboot is triggered only by the installer "reboot required" exit code (`17022`), never by Windows pending-reboot registry markers, so it runs at most once per patching campaign. `Reboot.Force` can reboot even when the installer did not request one. Inspired by how SharePointDsc handles reboots in PULL mode.
+- Independent schedule windows for the binary install (`Binaries.Schedule`) and the reboot (`Reboot.Schedule`), each `{ Days, Time }`, validated by the new public helper `Test-SPSScheduleWindow`.
+- A `Reboot` phase on the near real-time dashboard showing the reboot lifecycle per server (Running "Automatic Reboot launched, check the server in a few minutes" -> Done "Server back online after automatic reboot"; also Pending when a required reboot is deferred until its window, Skipped when no reboot is required or one was already performed this campaign, Failed when the schedule is invalid or the confirmation task cannot be registered). When the feature is disabled no reboot phase is shown at all.
+- New status-only `-Action ConfirmReboot`, run at boot by a one-shot `SPSUpdate-RebootConfirm` scheduled task (registered via the new `-BootTrigger` switch on `Add-SPSScheduledTask`) that stamps the reboot as Done, logs it to the event log (source `Restart-SPSServer`, ID 3010) and self-deletes.
+- Behavioural Pester coverage for `ConvertTo-SPSHtmlEncoded`, `Test-SPSPendingReboot` (all reboot markers plus multi-marker aggregation), and the `Mount-SPSContentDatabase` / `Update-SPSContentDatabase` content-database wrappers.
+
 ### Fixed
 
 - `Test-SPSPendingReboot` now normalizes the `WindowsUpdate\Services\Pending` child-item query with `@(...)`, so a single pending entry (a scalar on Windows PowerShell 5.1) is still counted reliably.
-
-### Added
-
-- Behavioural Pester coverage for `ConvertTo-SPSHtmlEncoded`, `Test-SPSPendingReboot` (all reboot markers plus multi-marker aggregation), and the `Mount-SPSContentDatabase` / `Update-SPSContentDatabase` content-database wrappers.
 
 ## [5.0.1] - 2026-09-21
 

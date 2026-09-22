@@ -42,6 +42,14 @@ Describe 'Environment config example (CONTOSO-PROD.example.psd1)' {
         $cfg.SideBySideToken | Should -Not -BeNullOrEmpty
         $cfg.SideBySideToken.ContainsKey('Enable') | Should -BeTrue
     }
+
+    It 'defines an opt-in Reboot block that is off by default' {
+        $cfg.Reboot | Should -Not -BeNullOrEmpty
+        $cfg.Reboot.ContainsKey('Enable') | Should -BeTrue
+        $cfg.Reboot.Enable | Should -BeFalse
+        $cfg.Reboot.ContainsKey('Force') | Should -BeTrue
+        $cfg.Reboot.Force | Should -BeFalse
+    }
 }
 
 Describe 'Secrets example (secrets.example.psd1)' {

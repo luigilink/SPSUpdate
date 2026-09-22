@@ -31,6 +31,7 @@
         'Start-SPSProductUpdate'
         'Start-SPSScheduledTask'
         'Test-SPSPendingReboot'
+        'Test-SPSScheduleWindow'
         'Update-SPSContentDatabase'
     )
 

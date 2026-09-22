@@ -19,7 +19,11 @@
 
         [Parameter()]
         [System.String]
-        $TaskPath = 'SharePoint' # Path of the task folder
+        $TaskPath = 'SharePoint', # Path of the task folder
+
+        [Parameter()]
+        [switch]
+        $BootTrigger # Add an "at startup" trigger (used by the one-shot reboot-confirm task)
     )
 
     # Initialize variables
@@ -69,6 +73,20 @@
     $TaskAction.Path = $TaskCmd # Path to the executable
     $TaskAction.Arguments = $ActionArguments # Arguments for the executable
 
+    # Optionally add an "at startup" trigger (8 = TASK_TRIGGER_BOOT). Used by the one-shot
+    # reboot-confirmation task so it runs after the server comes back and self-deletes. A
+    # bounded repetition (every 10 minutes for 1 hour) lets it retry within the SAME boot if
+    # the status store (a UNC share) is briefly unavailable right after startup, instead of
+    # only getting one chance until the next reboot.
+    if ($BootTrigger) {
+        $TaskBootTrigger = $TaskSchd.Triggers.Create(8)
+        $TaskBootTrigger.Enabled = $true
+        $TaskBootTrigger.Repetition.Interval = 'PT10M'
+        $TaskBootTrigger.Repetition.Duration = 'PT1H'
+        # Do not start a second instance if a previous run is still going (2 = IgnoreNew).
+        $TaskSettings.MultipleInstances = 2
+    }
+
     try {
         # Register/update the task (6 = create or update). Cast to [void] so the
         # returned RegisteredTask COM object is not dumped into the transcript.
@@ -82,5 +100,8 @@ ActionArguments: $($ActionArguments)
 Exception: $($_.Exception.Message)
 "@
         Write-Error -Message $catchMessage # Handle any errors during task registration
+        # Rethrow so callers can treat a failed registration as terminating instead of
+        # relying on a later existence check (which could see a stale task and proceed).
+        throw $catchMessage
     }
 }

@@ -18,7 +18,7 @@ logic lives in the `SPSUpdate.Common` module; the script just orchestrates it.
 | Parameter | Description |
 | --- | --- |
 | `ConfigFile` | Path to the environment configuration file (`*.psd1`). **Required.** |
-| `Action` | (Optional) `Install`, `Uninstall`, `Default`, `ProductUpdate`, `InitContentDB` or `ResetStatus`. `Install`/`Uninstall` manage the scheduled tasks and the stored secret (`Install` requires `InstallAccount`). `ProductUpdate` installs the binaries locally. `InitContentDB` (re)generates the ContentDatabase inventory JSON. `ResetStatus` clears the status store campaign and writes an initial live dashboard so you can open it in a browser before patching begins (see [Near real-time patching dashboard](#near-real-time-patching-dashboard)). Defaults to `Default`. |
+| `Action` | (Optional) `Install`, `Uninstall`, `Default`, `ProductUpdate`, `InitContentDB`, `ResetStatus` or `ConfirmReboot`. `Install`/`Uninstall` manage the scheduled tasks and the stored secret (`Install` requires `InstallAccount`). `ProductUpdate` installs the binaries locally (and, when the `Reboot` block is enabled, reboots the server automatically — see [Automatic reboot after a CU install](#automatic-reboot-after-a-cu-install)). `InitContentDB` (re)generates the ContentDatabase inventory JSON. `ResetStatus` clears the status store campaign and writes an initial live dashboard so you can open it in a browser before patching begins (see [Near real-time patching dashboard](#near-real-time-patching-dashboard)). `ConfirmReboot` is an internal status-only action run at boot by the one-shot reboot-confirmation task. Defaults to `Default`. |
 | `Sequence` | (Optional, 1–4) Internal: selects which content-database group a parallel scheduled task processes. |
 | `InstallAccount` | (Optional) Required with `-Action Install`. The service account stored in `secrets.psd1`. |
 
@@ -183,6 +183,45 @@ The status files of one patching campaign live under
 
 The dashboard shows the overall state, per-server / per-sequence progress, per-database and
 per-binary item states with exit codes, and a completion percentage for each sequence.
+
+## Automatic reboot after a CU install
+
+A cumulative update frequently requires a reboot before the Configuration Wizard can run
+(the installer returns exit code `17022`). SPSUpdate can perform that reboot automatically,
+once, when the optional `Reboot` block is enabled in the config (it is **off by default**):
+
+```powershell
+Reboot = @{
+    Enable   = $true
+    Force    = $false                     # reboot strictly on exit code 17022
+    Schedule = @{ Days = @('sat','sun'); Time = '3:00 AM to 4:00 AM' }
+}
+```
+
+When enabled, at the end of `-Action ProductUpdate` on a server:
+
+1. If the install returned `17022` (or `Reboot.Force` is set) and the current time is
+   inside the optional `Reboot.Schedule` window, SPSUpdate marks the **Reboot** phase as
+   *Running* on the dashboard ("Automatic Reboot launched, check the server in a few
+   minutes") and logs a Windows Event Log entry (source `Restart-SPSServer`, ID 3010).
+2. It registers a one-shot boot task (`SPSUpdate-RebootConfirm`, running as the
+   InstallAccount) and restarts the server.
+3. When the server comes back, that task runs `-Action ConfirmReboot`, which marks the
+   Reboot phase as *Done* ("Server back online after automatic reboot"), logs the
+   completion and removes itself.
+
+The reboot is triggered **only** by the installer exit code, never by Windows
+pending-reboot registry markers (which commonly stay set on production farms), so it
+happens at most once per patching campaign. Outside the schedule window the dashboard
+shows the reboot as *Pending*; with `Reboot.Enable = $false` no reboot is attempted.
+
+Use `-WhatIf` on the `ProductUpdate` run for a full dry run: it skips the binary install
+(and therefore the reboot) and logs what it would do without making any change.
+
+> [!WARNING]
+> Reboots are **per-server**. On a farm, do not reboot the sole Distributed Cache host or
+> the last available WFE at the same time — run `ProductUpdate` one server at a time and
+> keep the farm quorum in mind.
 
 ## Logging
 

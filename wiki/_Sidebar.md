@@ -5,6 +5,7 @@
 - [⚙️ Configuration](Configuration)
 - [📖 Usage](Usage)
   - [📊 Live dashboard](Usage#near-real-time-patching-dashboard)
+  - [🔁 Automatic reboot](Usage#automatic-reboot-after-a-cu-install)
 - [📦 Release Process](Release-Process)
 
 ---

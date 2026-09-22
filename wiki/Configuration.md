@@ -106,6 +106,60 @@ Use `ProductUpdate`, `SetupFullPath`, `SetupFileName` and `ShutdownServices` to 
 the binary installation step. `SetupFileName` is an array, so you can list a single uber
 package or the STS + WSSLOC (language) pair, installed in order.
 
+### `Binaries.Schedule` (optional)
+
+An optional window restricting **when** the binary install may run:
+
+```powershell
+Binaries = @{
+    # ...
+    Schedule = @{
+        Days = @('sat', 'sun')          # optional: allowed days (mon..sun)
+        Time = '2:00 AM to 5:00 AM'      # optional: same-day window
+    }
+}
+```
+
+`Days` and `Time` are both optional and independent. Omit `Schedule` (or its keys) to
+allow the install at any time. The time window is same-day only (a window crossing
+midnight is rejected). Both `Binaries.Schedule` and `Reboot.Schedule` share this shape.
+
+## Reboot (automatic reboot after a CU install)
+
+`Reboot` is an **optional, opt-in** block. When enabled, a server that reports "reboot
+required" after the `ProductUpdate` step (installer exit code `17022`) is rebooted
+automatically, once, and the live dashboard shows the reboot lifecycle.
+
+```powershell
+Reboot = @{
+    Enable   = $false                    # opt-in; default $false
+    Force    = $false                    # reboot even on exit 0; default $false
+    Schedule = @{                        # optional reboot window (same shape as above)
+        Days = @('sat', 'sun')
+        Time = '3:00 AM to 4:00 AM'
+    }
+}
+```
+
+| Key | Description | Default |
+|---|---|---|
+| `Enable` | Allow SPSUpdate to reboot a server automatically after a CU install. | `$false` |
+| `Force` | Reboot even when the installer did not request one (exit code 0). Leave off to reboot strictly on exit code `17022`. | `$false` |
+| `Schedule` | Optional `{ Days, Time }` window restricting when the reboot may happen. Outside the window the dashboard shows the reboot as **pending**. | any time |
+
+**How it works.** The reboot is triggered **only** by the installer exit code `17022`
+(never by Windows pending-reboot registry markers, which stay stuck on production farms),
+so it happens at most once per patching campaign. Just before rebooting, SPSUpdate marks
+the `Reboot` phase as *Running* ("Automatic Reboot launched, check the server in a few
+minutes"), writes a Windows Event Log entry (source `Restart-SPSServer`, ID 3010) and
+registers a one-shot boot task that, when the server is back, stamps the reboot as *Done*
+("Server back online after automatic reboot") and removes itself.
+
+> [!WARNING]
+> Reboots are **per-server**. On a farm you remain responsible for not rebooting the sole
+> Distributed Cache host or the last available WFE at the same time. Run `ProductUpdate`
+> (and its reboot) one server at a time, and keep the farm quorum in mind.
+
 ## UpgradeContentDatabase
 
 `UpgradeContentDatabase` runs `Upgrade-SPContentDatabase` in parallel (4 sequences) for
