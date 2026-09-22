@@ -19,7 +19,11 @@
 
         [Parameter()]
         [System.String]
-        $TaskPath = 'SharePoint' # Path of the task folder
+        $TaskPath = 'SharePoint', # Path of the task folder
+
+        [Parameter()]
+        [switch]
+        $BootTrigger # Add an "at startup" trigger (used by the one-shot reboot-confirm task)
     )
 
     # Initialize variables
@@ -68,6 +72,13 @@
     $TaskAction = $TaskSchd.Actions.Create(0) # 0 = Executable action
     $TaskAction.Path = $TaskCmd # Path to the executable
     $TaskAction.Arguments = $ActionArguments # Arguments for the executable
+
+    # Optionally add an "at startup" trigger (8 = TASK_TRIGGER_BOOT). Used by the one-shot
+    # reboot-confirmation task so it runs once after the server comes back and self-deletes.
+    if ($BootTrigger) {
+        $TaskBootTrigger = $TaskSchd.Triggers.Create(8)
+        $TaskBootTrigger.Enabled = $true
+    }
 
     try {
         # Register/update the task (6 = create or update). Cast to [void] so the
