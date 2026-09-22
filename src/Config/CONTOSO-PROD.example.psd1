@@ -70,6 +70,40 @@
         # (they are restored to their prior state afterwards).
         # Possible values : $true | $false.   Default if omitted: $true
         ShutdownServices = $true
+
+        # Schedule : OPTIONAL window restricting WHEN the binary install may run. Omit to
+        # allow the install at any time. Days is a list of short day names; Time is a
+        # same-day window '<start> to <end>'. Both are optional and independent.
+        # Possible values : Days = @('mon'..'sun'); Time = '2:00 AM to 5:00 AM' or '02:00 to 05:00'.
+        # Schedule       = @{
+        #     Days = @('sat', 'sun')
+        #     Time = '2:00 AM to 5:00 AM'
+        # }
+    }
+
+    # --- Automatic reboot after a CU install (OPTIONAL block) -------------------------
+    # Opt-in. When enabled, a server that returns "reboot required" (installer exit code
+    # 17022) after the ProductUpdate step is rebooted automatically, once, and the live
+    # dashboard shows the reboot lifecycle. The reboot is triggered ONLY by the installer
+    # exit code (never by Windows pending-reboot registry markers, which stay stuck on
+    # production farms). WARNING: reboots are per-server; on a farm you remain responsible
+    # for not rebooting the sole Distributed Cache host or the last available WFE at once.
+    Reboot                 = @{
+        # Enable : allow SPSUpdate to reboot a server automatically after a CU install.
+        # Possible values : $true | $false.   Default if omitted: $false
+        Enable   = $false
+
+        # Force : reboot even when the installer did not request one (exit code 0). Leave
+        # $false to reboot strictly when a reboot was required (exit code 17022).
+        # Possible values : $true | $false.   Default if omitted: $false
+        Force    = $false
+
+        # Schedule : OPTIONAL window restricting WHEN a reboot may happen (same shape as
+        # Binaries.Schedule). Outside the window the dashboard shows the reboot as pending.
+        # Schedule = @{
+        #     Days = @('sat', 'sun')
+        #     Time = '3:00 AM to 4:00 AM'
+        # }
     }
 
     # --- Content database handling (OPTIONAL) ----------------------------------------

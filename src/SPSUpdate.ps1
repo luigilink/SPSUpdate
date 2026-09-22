@@ -172,6 +172,19 @@ function Get-SPSUpdateConfiguration {
         $config.SideBySideToken.BuildVersion = ''
     }
 
+    # Normalize the Reboot block and apply defaults. Automatic reboot after a CU install
+    # is opt-in: it stays off unless Reboot.Enable is explicitly set to $true. The optional
+    # Reboot.Schedule (Days/Time) is validated at use time by Test-SPSScheduleWindow.
+    if (-not $config.ContainsKey('Reboot') -or $null -eq $config.Reboot) {
+        $config.Reboot = @{}
+    }
+    if (-not $config.Reboot.ContainsKey('Enable')) {
+        $config.Reboot.Enable = $false
+    }
+    if (-not $config.Reboot.ContainsKey('Force')) {
+        $config.Reboot.Force = $false
+    }
+
     # StatusStorePath is optional; empty string means "use the local Results\status folder".
     if (-not $config.ContainsKey('StatusStorePath') -or $null -eq $config.StatusStorePath) {
         $config.StatusStorePath = ''
