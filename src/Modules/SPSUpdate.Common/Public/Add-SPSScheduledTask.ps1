@@ -74,10 +74,17 @@
     $TaskAction.Arguments = $ActionArguments # Arguments for the executable
 
     # Optionally add an "at startup" trigger (8 = TASK_TRIGGER_BOOT). Used by the one-shot
-    # reboot-confirmation task so it runs once after the server comes back and self-deletes.
+    # reboot-confirmation task so it runs after the server comes back and self-deletes. A
+    # bounded repetition (every 10 minutes for 1 hour) lets it retry within the SAME boot if
+    # the status store (a UNC share) is briefly unavailable right after startup, instead of
+    # only getting one chance until the next reboot.
     if ($BootTrigger) {
         $TaskBootTrigger = $TaskSchd.Triggers.Create(8)
         $TaskBootTrigger.Enabled = $true
+        $TaskBootTrigger.Repetition.Interval = 'PT10M'
+        $TaskBootTrigger.Repetition.Duration = 'PT1H'
+        # Do not start a second instance if a previous run is still going (2 = IgnoreNew).
+        $TaskSettings.MultipleInstances = 2
     }
 
     try {

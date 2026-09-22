@@ -318,6 +318,13 @@ function Resolve-SPSScheduleValue {
     if ($Schedule -isnot [System.Collections.IDictionary]) {
         throw "$Label must be a hashtable with optional 'Days' and 'Time' keys, not '$($Schedule.GetType().Name)'."
     }
+    # Reject unknown keys so a typo (for example 'Day' or 'Times') fails closed instead of
+    # silently resolving to "no restriction" and allowing the action at any time.
+    foreach ($key in $Schedule.Keys) {
+        if ($key -ne 'Days' -and $key -ne 'Time') {
+            throw "$Label contains an unknown key '$key'. Only 'Days' and 'Time' are allowed."
+        }
+    }
     if ($Schedule.Contains('Days')) { $result.Days = $Schedule['Days'] }
     if ($Schedule.Contains('Time')) { $result.Time = $Schedule['Time'] }
     return $result
@@ -387,8 +394,22 @@ function Invoke-SPSAutomaticReboot {
         return
     }
     if (-not $inWindow) {
+        # Persist the deferred request so a later in-window run can honor it (the installer
+        # will then report "already installed" and no longer return 17022). If the marker
+        # cannot be written, the request would be lost, so report Failed rather than a Pending
+        # that will never be retried.
         if ($null -ne $rebootPendingMarker) {
-            Set-Content -Path $rebootPendingMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue
+            try {
+                Set-Content -Path $rebootPendingMarker -Value (Get-Date -Format o) -Force -ErrorAction Stop
+            }
+            catch {
+                $catchMessage = "Reboot required on $thisServer but the deferred-request marker could not be written ($($_.Exception.Message)); the reboot cannot be safely deferred. Reboot the server manually."
+                Write-Error -Message $catchMessage
+                Add-SPSUpdateEvent -Message $catchMessage -Source 'Restart-SPSServer' -EntryType 'Error'
+                Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Failed' -Detail 'Could not persist the deferred reboot request; reboot manually'
+                Write-SPSDashboard
+                return
+            }
         }
         Write-Output "Reboot required on $thisServer but outside the configured reboot window; deferring until the next in-window run."
         Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Pending' -Detail 'Reboot required - waiting for the scheduled reboot window'
