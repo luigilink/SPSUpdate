@@ -157,9 +157,10 @@
     ) -join ''
 
     # ---- Phase sections -----------------------------------------------------------
-    $phaseOrder = @('ProductUpdate', 'Mount', 'Upgrade', 'Sequence', 'Wizard', 'SideBySide')
+    $phaseOrder = @('ProductUpdate', 'Reboot', 'Mount', 'Upgrade', 'Sequence', 'Wizard', 'SideBySide')
     $phaseLabels = @{
         ProductUpdate = 'Product update (binaries)'
+        Reboot        = 'Server reboot'
         Mount         = 'Content database mount'
         Upgrade       = 'Content database upgrade'
         Sequence      = 'Content database sequences'

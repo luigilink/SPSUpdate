@@ -72,7 +72,7 @@
         $Scope,
 
         [Parameter()]
-        [ValidateSet('ProductUpdate', 'Mount', 'Upgrade', 'Sequence', 'Wizard', 'SideBySide')]
+        [ValidateSet('ProductUpdate', 'Reboot', 'Mount', 'Upgrade', 'Sequence', 'Wizard', 'SideBySide')]
         [System.String]
         $Phase = 'Sequence',
 

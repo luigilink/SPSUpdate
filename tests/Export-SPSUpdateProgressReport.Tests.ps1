@@ -158,3 +158,24 @@ Describe 'Export-SPSUpdateProgressReport (search farm, no content databases)' {
         $script:sfHtml | Should -Not -Match 'class="badge Failed"'
     }
 }
+
+Describe 'Export-SPSUpdateProgressReport (server reboot phase)' {
+    BeforeAll {
+        $script:rbCamp = New-Campaign -Name 'reboot'
+        Set-SPSUpdateStatus -CampaignPath $script:rbCamp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Item 'uber.exe' -ItemState 'Done' -ExitCode 17022 -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $script:rbCamp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP1' -State 'Running' -Detail 'Automatic Reboot launched, check the server in a few minutes' -Confirm:$false | Out-Null
+        $script:rbHtml = Get-Content -Path (Export-SPSUpdateProgressReport -CampaignPath $script:rbCamp -EnvName 'PROD' -AppCode 'zebes' -FarmName 'CONTENT') -Raw
+    }
+
+    It 'renders a Server reboot section with the launch message' {
+        $script:rbHtml | Should -Match 'Server reboot'
+        $script:rbHtml | Should -Match 'Automatic Reboot launched, check the server in a few minutes'
+    }
+
+    It 'orders the reboot section right after the product update section' {
+        $puIndex = $script:rbHtml.IndexOf('Product update')
+        $rbIndex = $script:rbHtml.IndexOf('Server reboot')
+        $puIndex | Should -BeGreaterThan -1
+        $rbIndex | Should -BeGreaterThan $puIndex
+    }
+}
