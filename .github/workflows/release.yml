@@ -37,7 +37,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           draft: false
-          prerelease: false
+          # Publish as a GitHub pre-release (not marked "latest") when the tag carries a
+          # SemVer pre-release label, e.g. v5.1.0-preview.1. A plain tag like v5.1.0 is a
+          # normal release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: RELEASE-NOTES.md
           files: |
             LICENSE
