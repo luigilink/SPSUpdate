@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'SPSUpdate.Common.psm1'
-    ModuleVersion     = '5.0.1'
+    ModuleVersion     = '5.1.0'
     GUID              = 'd6f4e2b7-3a1c-4d8e-9f2a-6c5b7e0a1d34'
     Author            = 'Jean-Cyril DROUHIN'
     CompanyName       = 'luigilink'
@@ -45,6 +45,8 @@
             LicenseUri   = 'https://github.com/luigilink/SPSUpdate/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/luigilink/SPSUpdate'
             ReleaseNotes = 'https://github.com/luigilink/SPSUpdate/blob/main/RELEASE-NOTES.md'
+            # Prerelease marker (SemVer 2.0 pre-release label). Cleared for the 5.1.0 GA.
+            Prerelease   = 'preview1'
         }
     }
 }

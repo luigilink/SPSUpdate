@@ -86,6 +86,49 @@ The `.github/workflows/release.yml` workflow runs automatically. It:
 - **Actions**: <https://github.com/luigilink/SPSUpdate/actions> — `release.yml` and `pester.yml` ran green.
 - **Wiki**: <https://github.com/luigilink/SPSUpdate/wiki> — `wiki.yml` synced any `wiki/` changes pushed in the same release.
 
+## Preview / pre-release
+
+Use a **preview (pre-release)** to validate a risky or hardware-dependent feature on a real
+farm before the general availability (GA) release — for example the automatic reboot
+feature, whose Windows-only reboot path can only be exercised on a live SharePoint server.
+
+### Versioning a preview
+
+- **Tag** carries a SemVer 2.0 pre-release label: `v<version>-preview.<N>` (e.g. `v5.1.0-preview.1`, `v5.1.0-preview.2`, …).
+- **Module manifest** keeps a numeric `ModuleVersion` (e.g. `5.1.0`) and marks the preview with a `Prerelease` value under `PrivateData.PSData` (e.g. `Prerelease = 'preview1'`). `ModuleVersion` cannot contain a `-preview` suffix. Clear `Prerelease` for the GA.
+- **CHANGELOG** gets a dated `## [5.1.0-preview.1]` section, keeping an empty `## [Unreleased]` on top. The GA later promotes the accumulated entries to `## [5.1.0]`.
+- **RELEASE-NOTES.md** describes the preview and how to test it.
+
+### How the workflow handles it
+
+`release.yml` sets `prerelease: ${{ contains(github.ref_name, '-') }}`, so:
+
+- a tag **with** a `-` (e.g. `v5.1.0-preview.1`) publishes a GitHub **pre-release** (not marked "latest");
+- a plain tag (e.g. `v5.1.0`) publishes a normal release.
+
+### Cutting a preview
+
+```bash
+# On the release branch (release/5.1.0): bump manifest Prerelease, promote CHANGELOG to
+# the -preview.N section, write RELEASE-NOTES, validate, commit and push.
+git checkout main
+git pull
+git tag v5.1.0-preview.1
+git push origin v5.1.0-preview.1
+```
+
+Share the pre-release with the tester (or the customer). Iterate with `-preview.2`,
+`-preview.3`, … as needed.
+
+### Promoting a preview to GA
+
+Once the preview is validated:
+
+1. Remove the `Prerelease` value from `PrivateData.PSData` in the manifest.
+2. Rename the CHANGELOG `## [5.1.0-preview.N]` heading to `## [5.1.0] - <date>` (keep `## [Unreleased]` on top).
+3. Update `RELEASE-NOTES.md` for the GA.
+4. Tag `v5.1.0` from `main` (a plain tag → normal release).
+
 ## Undoing a release
 
 If you tagged too early:
