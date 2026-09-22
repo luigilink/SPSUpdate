@@ -683,15 +683,35 @@ Exception: $_
         # was registered just before an automatic reboot. It stamps the local server's
         # reboot as Done on the live dashboard, logs the completion, then removes the
         # one-shot task so it never runs again. It never touches SharePoint or patching.
+        $rebootConfirmed = $false
         try {
             if ([string]::IsNullOrEmpty($statusCampaignPath)) {
                 Write-Warning -Message 'No status store campaign path resolved; cannot confirm the reboot.'
             }
             else {
                 Write-Output "Confirming automatic reboot completion for server: $thisServer"
-                Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Done' -Detail 'Server back online after automatic reboot'
-                Write-SPSDashboard
-                Add-SPSUpdateEvent -Message "Automatic reboot completed on $thisServer - server is back online." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
+                # Bounded retry: the status store may be a UNC share that is briefly
+                # unavailable at boot. Verify Reboot=Done actually persisted (read it back)
+                # before neutralizing the task, so a transient failure does not strand the
+                # dashboard at Running with no way to recover.
+                for ($attempt = 1; $attempt -le 5 -and -not $rebootConfirmed; $attempt++) {
+                    Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Done' -Detail 'Server back online after automatic reboot'
+                    $persisted = @(Get-SPSUpdateStatus -CampaignPath $statusCampaignPath -ErrorAction SilentlyContinue |
+                            Where-Object { $_.Phase -eq 'Reboot' -and $_.Server -eq $thisServer -and $_.State -eq 'Done' })
+                    if ($persisted.Count -gt 0) {
+                        $rebootConfirmed = $true
+                        break
+                    }
+                    Start-Sleep -Seconds 5
+                }
+                if ($rebootConfirmed) {
+                    Write-SPSDashboard
+                    Add-SPSUpdateEvent -Message "Automatic reboot completed on $thisServer - server is back online." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
+                }
+                else {
+                    Write-Warning -Message "Could not persist Reboot=Done for $thisServer after several attempts; leaving the confirmation task in place to retry on the next boot."
+                    Add-SPSUpdateEvent -Message "Could not persist the reboot completion status for $thisServer; the confirmation task will retry on the next boot." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                }
             }
         }
         catch {
@@ -703,22 +723,35 @@ Exception: $_
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Restart-SPSServer' -EntryType 'Error'
         }
         finally {
-            # Always neutralize the one-shot confirmation task, even if the status update
-            # failed, so it can never re-run on subsequent boots. Remove-SPSScheduledTask
-            # swallows a delete failure internally, so verify the task is actually gone and,
-            # if it is still present, disable it as a fallback (its boot trigger would
-            # otherwise fire on every later boot).
-            try {
-                Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
-                $stillThere = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
-                if ($null -ne $stillThere) {
-                    Write-Warning -Message "The reboot-confirm task '$script:TaskNameRebootConfirm' could not be removed; disabling it so it does not run again."
-                    Disable-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue | Out-Null
-                    Add-SPSUpdateEvent -Message "The one-shot reboot-confirm task on $thisServer could not be removed and was disabled instead. Please delete task '$script:TaskNameRebootConfirm' under '\$script:TaskPath\' manually." -Source 'Restart-SPSServer' -EntryType 'Warning'
+            # Only neutralize the one-shot confirmation task once completion is confirmed, so
+            # a transient status-store failure does not strand the dashboard at Running: the
+            # task simply retries on the next boot instead. Remove-SPSScheduledTask swallows a
+            # delete failure internally, so verify the task is actually gone; if it is still
+            # present, disable it and verify the disable actually took effect.
+            if ($rebootConfirmed) {
+                try {
+                    Remove-SPSScheduledTask -Name $script:TaskNameRebootConfirm -TaskPath $script:TaskPath -Confirm:$false
+                    $stillThere = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
+                    if ($null -ne $stillThere) {
+                        Write-Warning -Message "The reboot-confirm task '$script:TaskNameRebootConfirm' could not be removed; disabling it so it does not run again."
+                        try {
+                            Disable-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction Stop | Out-Null
+                        }
+                        catch {
+                            Write-Warning -Message "Disabling the reboot-confirm task failed: $($_.Exception.Message)"
+                        }
+                        $confirmState = (Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue).State
+                        if ("$confirmState" -eq 'Disabled') {
+                            Add-SPSUpdateEvent -Message "The one-shot reboot-confirm task on $thisServer could not be removed and was disabled instead. Please delete task '$script:TaskNameRebootConfirm' under '\$script:TaskPath\' manually." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                        }
+                        else {
+                            Add-SPSUpdateEvent -Message "The one-shot reboot-confirm task on $thisServer could NOT be removed or disabled and may run again on every boot. Delete task '$script:TaskNameRebootConfirm' under '\$script:TaskPath\' manually as soon as possible." -Source 'Restart-SPSServer' -EntryType 'Error'
+                        }
+                    }
                 }
-            }
-            catch {
-                Write-Warning -Message "Could not remove the reboot-confirm task '$script:TaskNameRebootConfirm': $($_.Exception.Message)"
+                catch {
+                    Write-Warning -Message "Could not remove the reboot-confirm task '$script:TaskNameRebootConfirm': $($_.Exception.Message)"
+                }
             }
         }
     }
@@ -962,6 +995,15 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                 # Windows reboot markers (CBS, PendingFileRenameOperations, etc.) commonly
                 # remain set after several reboots, which caused the script to abort the
                 # ProductUpdate even when the system was actually in a healthy state.
+                # Honor -WhatIf as a genuine dry run: skip the actual install (and therefore
+                # the reboot, since no 17022 is produced) instead of only suppressing the
+                # restart. Without this guard, ProductUpdate -WhatIf would still install the CU.
+                if (-not $PSCmdlet.ShouldProcess($fullSetupFilePath, 'Install the SharePoint cumulative update')) {
+                    Write-Output "[WhatIf] Would install $setupFile on $thisServer (dry run; no changes made)."
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Skipped' -ItemDetail 'WhatIf: would install'
+                    Write-SPSDashboard
+                    continue
+                }
                 # Unblock setup file if it is blocked
                 Unblock-File -Path $fullSetupFilePath -Verbose
                 $puExitCode = Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices -Verbose

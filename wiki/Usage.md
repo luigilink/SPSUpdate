@@ -215,8 +215,8 @@ pending-reboot registry markers (which commonly stay set on production farms), s
 happens at most once per patching campaign. Outside the schedule window the dashboard
 shows the reboot as *Pending*; with `Reboot.Enable = $false` no reboot is attempted.
 
-Use `-WhatIf` on the `ProductUpdate` run for a dry run that logs "would reboot" without
-restarting.
+Use `-WhatIf` on the `ProductUpdate` run for a full dry run: it skips the binary install
+(and therefore the reboot) and logs what it would do without making any change.
 
 > [!WARNING]
 > Reboots are **per-server**. On a farm, do not reboot the sole Distributed Cache host or
