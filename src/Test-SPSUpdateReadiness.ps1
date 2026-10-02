@@ -282,11 +282,16 @@ elseif ($null -ne $cfg -and $cfg.Contains('Domain') -and $cfg.Domain) {
         Add-CheckResult -Section 'Network' -Name 'Farm server enumeration' -Status 'SKIP' -Detail 'SharePoint not loaded; cannot enumerate servers'
     }
 
-    # Remoting.AllowFallback governs whether a CredSSP failure is fatal (off) or falls back
-    # to Negotiate (on). The readiness file is read raw here, so default to the secure $false.
+    # Remoting.AllowFallback is read raw here; default to the secure $false and reject a
+    # non-Boolean value (which Get-SPSUpdateConfiguration also rejects at run time).
     $allowFallback = $false
     if ($null -ne $cfg -and $cfg.Contains('Remoting') -and $cfg.Remoting -and $cfg.Remoting.Contains('AllowFallback')) {
-        $allowFallback = [bool]$cfg.Remoting.AllowFallback
+        if ($cfg.Remoting.AllowFallback -is [bool]) {
+            $allowFallback = $cfg.Remoting.AllowFallback
+        }
+        else {
+            Add-CheckResult -Section 'Network' -Name 'Remoting.AllowFallback' -Status 'FAIL' -Detail "Must be a Boolean (`$true/`$false); the run will reject '$($cfg.Remoting.AllowFallback)'"
+        }
     }
 
     foreach ($target in ($targets | Sort-Object -Unique)) {
@@ -336,7 +341,7 @@ elseif ($null -ne $cfg -and $cfg.Contains('Domain') -and $cfg.Domain) {
                     Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'WARN' -Detail "CredSSP failed; Negotiate fallback works, but double-hop steps (SQL/file share) may fail without Kerberos delegation: $credsspError"
                 }
                 catch {
-                    Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'FAIL' -Detail "Both CredSSP and Negotiate fallback failed: $($_.Exception.Message)"
+                    Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'FAIL' -Detail "Both CredSSP and Negotiate failed. CredSSP: $credsspError | Negotiate: $($_.Exception.Message)"
                 }
                 finally {
                     if ($negSession) { Remove-PSSession -Session $negSession -ErrorAction SilentlyContinue }

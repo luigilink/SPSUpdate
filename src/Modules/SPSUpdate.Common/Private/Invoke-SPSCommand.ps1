@@ -61,6 +61,7 @@
     $sessionOption = Get-SPSRemoteSessionOption
     $session = $null
     $lastError = $null
+    $authErrors = [System.Collections.Generic.List[string]]::new()
     foreach ($auth in $authChain) {
         try {
             $session = New-PSSession -ComputerName $Server `
@@ -77,6 +78,7 @@
         }
         catch {
             $lastError = $_
+            $authErrors.Add("${auth}: $($_.Exception.Message)")
             Write-Warning -Message "Failed to open a '$auth' PSSession to '$Server': $($_.Exception.Message)"
         }
     }
@@ -86,8 +88,9 @@
             # Keep the original CredSSP-only message for strict environments.
             throw "Failed to open a CredSSP PSSession to '$Server': $($lastError.Exception.Message)"
         }
+        # Keep every method's error so a broken CredSSP setup and the fallback failure are both visible.
         throw ("Failed to open a remote PSSession to '$Server' using any of: $($authChain -join ', '). " + `
-                "Last error: $($lastError.Exception.Message)")
+                "Errors - $($authErrors -join ' | ')")
     }
 
     $invokeArgs.Add("Session", $session)

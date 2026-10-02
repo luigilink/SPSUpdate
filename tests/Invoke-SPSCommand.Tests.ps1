@@ -59,23 +59,35 @@ Describe 'Invoke-SPSCommand authentication chain' {
                 -AllowFallback -WarningVariable warnings -WarningAction SilentlyContinue
 
             $result | Should -Be 'remote-output'
-            $warnings | Should -Not -BeNullOrEmpty
+            $warningText = (@($warnings) | ForEach-Object { $_.ToString() }) -join "`n"
+            $warningText | Should -Match 'Negotiate'
+            $warningText | Should -Match 'Kerberos delegation'
             Should -Invoke New-PSSession -Times 1 -Exactly -ParameterFilter { $Authentication -eq 'CredSSP' }
             Should -Invoke New-PSSession -Times 1 -Exactly -ParameterFilter { $Authentication -eq 'Negotiate' }
         }
     }
 
-    It 'throws an aggregated error when every authentication method fails' {
+    It 'throws an aggregated error that keeps every authentication method error' {
         InModuleScope SPSUpdate.Common {
             Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
             Mock Invoke-Command { 'remote-output' }
             Mock Remove-PSSession { }
-            Mock New-PSSession { throw 'unreachable' }
+            Mock New-PSSession {
+                if ($Authentication -eq 'CredSSP') { throw 'credssp-down' }
+                throw 'negotiate-down'
+            }
 
             $cred = [System.Management.Automation.PSCredential]::new('CONTOSO\svc', (New-Object System.Security.SecureString))
-            { Invoke-SPSCommand -Credential $cred -Server 'APP01' -ScriptBlock { 'x' } `
-                    -AllowFallback -WarningAction SilentlyContinue } |
-                Should -Throw -ExpectedMessage '*using any of: CredSSP, Negotiate*'
+            try {
+                Invoke-SPSCommand -Credential $cred -Server 'APP01' -ScriptBlock { 'x' } `
+                    -AllowFallback -WarningAction SilentlyContinue
+                throw 'should have thrown'
+            }
+            catch {
+                $_.Exception.Message | Should -Match 'using any of: CredSSP, Negotiate'
+                $_.Exception.Message | Should -Match 'credssp-down'
+                $_.Exception.Message | Should -Match 'negotiate-down'
+            }
         }
     }
 
