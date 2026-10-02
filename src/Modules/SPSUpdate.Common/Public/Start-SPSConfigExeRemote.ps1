@@ -59,16 +59,26 @@
         Write-Verbose -Message "PSConfig Exit Code: $($psconfig.ExitCode)"
         return $psconfig.ExitCode
     }
-    # Error codes: https://aka.ms/installerrorcodes
-    switch ($result) {
-        0 {
-            Write-Verbose -Message "SharePoint Post Setup Configuration Wizard ran successfully"
-        }
-        Default {
-            $message = ("SharePoint Post Setup Configuration Wizard failed, " + `
-                    "exit code was $result. Error codes can be found at " + `
-                    "https://aka.ms/installerrorcodes")
-            throw $message
-        }
+    # Require an integer exit code: if the remote script fails before psconfig returns a
+    # code (for example the farm preparation step errors non-terminatingly), Invoke-SPSCommand
+    # can return no usable value. Reporting that as success would mask a real failure, so throw
+    # and let the caller record the wizard as Failed (and log an error event).
+    $remoteExit = @($result) | Where-Object { $_ -is [int] } | Select-Object -Last 1
+    if ($null -eq $remoteExit) {
+        throw ("SharePoint Post Setup Configuration Wizard on '$Server' did not return an exit code; " + `
+                "the remote PSConfig run did not complete. Error codes can be found at " + `
+                "https://aka.ms/installerrorcodes")
     }
+    # Error codes: https://aka.ms/installerrorcodes
+    # Do not throw on a non-zero exit code: psconfig reports the exit code for the whole
+    # command chain, so a later sub-command can return non-zero even when the
+    # build-to-build upgrade itself completed. The caller re-checks the authoritative
+    # patch status (see Resolve-SPSWizardOutcome) before declaring a failure. Returning
+    # the exit code keeps this function consistent with Start-SPSConfigExe.
+    if ($remoteExit -ne 0) {
+        Write-Warning -Message ("SharePoint Post Setup Configuration Wizard on '$Server' returned a " + `
+                "non-zero exit code ($remoteExit). Error codes can be found at " + `
+                "https://aka.ms/installerrorcodes")
+    }
+    return $remoteExit
 }

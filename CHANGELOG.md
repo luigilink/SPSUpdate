@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Configuration Wizard step no longer reports a false failure (`exit code was -1`) on remote servers after a successful build-to-build upgrade. `Start-SPSConfigExe` (local) and `Start-SPSConfigExeRemote` (remote) now handle the `psconfig.exe` exit code identically: both return the exit code instead of one returning while the other threw. A new public helper `Resolve-SPSWizardOutcome` re-checks the authoritative per-server patch status when the exit code is non-zero, so an error code returned by a later sub-command (`installfeatures` / `secureresources` / `services`) is reported as Done (with a warning) when the server reports `NoActionRequired`, and only as Failed when action is genuinely still required. The exit code is now surfaced in the dashboard detail for both the local and remote paths. ([#40](https://github.com/luigilink/SPSUpdate/issues/40))
+- Removed a dead `switch ($result)` block in `Start-SPSConfigExe` that referenced an undefined `$result` variable (a leftover from a refactor); the "Configuration Wizard not required" path now returns `0` instead of throwing an empty error message.
 - `Test-SPSPendingReboot` now normalizes the `WindowsUpdate\Services\Pending` child-item query with `@(...)`, so a single pending entry (a scalar on Windows PowerShell 5.1) is still counted reliably.
 
 ## [5.0.1] - 2026-09-21
