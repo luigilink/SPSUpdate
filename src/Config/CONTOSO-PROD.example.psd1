@@ -128,4 +128,16 @@
         # Possible values : '' or a SharePoint build, e.g. '16.0.17928.20238'.
         BuildVersion = ''
     }
+
+    # --- Remoting (OPTIONAL block; controls how remote servers are reached) ------------
+    Remoting               = @{
+        # AllowFallback : when $true, if the CredSSP session to a remote server cannot be
+        # opened (for example CredSSP is not configured), fall back to Negotiate instead of
+        # failing. CredSSP is always tried first. SECURITY/behaviour note: Negotiate cannot
+        # delegate the credential, so steps that need a second hop (config DB on SQL, or a
+        # binaries file share) may fail unless Kerberos delegation (KCD/RBCD) is configured.
+        # Leave off for secure, strict environments.
+        # Possible values : $true | $false.   Default if omitted: $false
+        AllowFallback = $false
+    }
 }

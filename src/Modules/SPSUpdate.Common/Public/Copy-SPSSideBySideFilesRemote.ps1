@@ -8,12 +8,17 @@
 
         [Parameter()]
         [System.Management.Automation.PSCredential]
-        $InstallAccount
+        $InstallAccount,
+
+        [Parameter()]
+        [Switch]
+        $AllowFallback
     )
 
     $result = Invoke-SPSCommand -Credential $InstallAccount `
         -Arguments @($PSBoundParameters, $MyInvocation.MyCommand.Source) `
         -Server $Server `
+        -AllowFallback:$AllowFallback `
         -ScriptBlock {
         $params = $args[0]
 
