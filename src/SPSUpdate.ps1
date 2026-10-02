@@ -1343,6 +1343,11 @@ Exception: $_
                     $wizResult = Start-SPSConfigExe
                     $wizOutcome = Resolve-SPSWizardOutcome -ExitCode $wizResult -Server "$($env:COMPUTERNAME)"
                     Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server $thisServer -State $wizOutcome.State -Detail $wizOutcome.Detail
+                    if ($wizOutcome.State -eq 'Failed') {
+                        # A non-zero exit no longer throws, so classified failures must still be
+                        # written to the event log for monitoring (previously done by the catch).
+                        Add-SPSUpdateEvent -Message $wizOutcome.Detail -Source 'Start-SPSConfigExe' -EntryType 'Error'
+                    }
                 }
                 Write-SPSDashboard
             }
@@ -1378,6 +1383,11 @@ Exception: $_
                         $wizResultRemote = Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
                         $wizOutcomeRemote = Resolve-SPSWizardOutcome -ExitCode $wizResultRemote -Server "$($spServer.Name)"
                         Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State $wizOutcomeRemote.State -Detail $wizOutcomeRemote.Detail
+                        if ($wizOutcomeRemote.State -eq 'Failed') {
+                            # A non-zero exit no longer throws, so classified failures must still be
+                            # written to the event log for monitoring (previously done by the catch).
+                            Add-SPSUpdateEvent -Message $wizOutcomeRemote.Detail -Source 'Start-SPSConfigExeRemote' -EntryType 'Error'
+                        }
                     }
                     Write-SPSDashboard
                 }

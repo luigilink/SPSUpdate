@@ -89,7 +89,11 @@
         }
     }
 
-    if ("$status" -eq 'NoActionRequired') {
+    # Track whether we actually obtained a usable status: a failed or empty lookup must not
+    # be reported as "action required" (which would imply a confirmed upgrade-status result).
+    $statusKnown = -not [string]::IsNullOrWhiteSpace("$status")
+
+    if ($statusKnown -and "$status" -eq 'NoActionRequired') {
         Write-Warning -Message ("PSConfig on '$Server' returned exit $([int]$exit) but the server reports " + `
                 "NoActionRequired; treating the upgrade as completed. Error codes: $errorCodeLink")
         return [PSCustomObject]@{
@@ -99,9 +103,16 @@
         }
     }
 
+    if ($statusKnown) {
+        $failDetail = "PSConfig failed (exit $([int]$exit)); $Server still requires action (status: $status). Error codes: $errorCodeLink"
+    }
+    else {
+        $failDetail = "PSConfig failed (exit $([int]$exit)) and the patch status for $Server could not be confirmed; treating as failed. Error codes: $errorCodeLink"
+    }
+
     return [PSCustomObject]@{
         State    = 'Failed'
         ExitCode = [int]$exit
-        Detail   = "PSConfig failed (exit $([int]$exit)); $Server still requires action. Error codes: $errorCodeLink"
+        Detail   = $failDetail
     }
 }

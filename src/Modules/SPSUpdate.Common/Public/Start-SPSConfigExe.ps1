@@ -52,6 +52,14 @@
         }
 
         Write-Output "PSConfig Exit Code: $($psconfig.ExitCode)"
+        if ($null -eq $psconfig -or $null -eq $psconfig.ExitCode) {
+            # psconfig was required but did not return an exit code (it failed to start or
+            # was interrupted). Throw so the caller records the wizard as Failed and logs an
+            # error event, rather than reporting a misleading success.
+            throw ("SharePoint Post Setup Configuration Wizard did not return an exit code; " + `
+                    "the PSConfig run did not complete. Error codes can be found at " + `
+                    "https://aka.ms/installerrorcodes")
+        }
         if ($psconfig.ExitCode -ne 0) {
             # Do not throw here: a non-zero exit code is reported by psconfig for the whole
             # command chain, so a later sub-command can return non-zero even when the

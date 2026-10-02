@@ -65,6 +65,24 @@ Describe 'Resolve-SPSWizardOutcome' {
             $result.State | Should -Be 'Failed'
             $result.ExitCode | Should -Be 3
         }
+
+        It 'distinguishes an unconfirmed status from confirmed action required' {
+            $unknown = Resolve-SPSWizardOutcome -ExitCode 3 -Server 'APP01' -PatchStatus ''
+            $unknown.State | Should -Be 'Failed'
+            $unknown.Detail | Should -Match 'could not be confirmed'
+
+            $confirmed = Resolve-SPSWizardOutcome -ExitCode 3 -Server 'APP01' -PatchStatus 'UpgradeRequired'
+            $confirmed.State | Should -Be 'Failed'
+            $confirmed.Detail | Should -Match 'still requires action'
+            $confirmed.Detail | Should -Match 'UpgradeRequired'
+        }
+
+        It 'treats a patch-status lookup failure as an unconfirmed (not action-required) failure' {
+            Mock -CommandName Get-SPSServersPatchStatus -ModuleName SPSUpdate.Common -MockWith { throw 'farm unavailable' }
+            $result = Resolve-SPSWizardOutcome -ExitCode 3 -Server 'APP01' -WarningAction SilentlyContinue
+            $result.State | Should -Be 'Failed'
+            $result.Detail | Should -Match 'could not be confirmed'
+        }
     }
 
     Context 'Authoritative status lookup' {
