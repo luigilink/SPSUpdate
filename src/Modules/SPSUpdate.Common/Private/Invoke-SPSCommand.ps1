@@ -51,18 +51,13 @@
     # Running garbage collection to resolve issues related to Azure DSC extension use
     [GC]::Collect()
 
-    # Build the ordered authentication chain. CredSSP is always tried first because it
-    # delegates the credential, which the remote SharePoint cmdlets need for the second hop
-    # (config DB on SQL, or a binaries file share). Negotiate is only appended when fallback
-    # is explicitly enabled (Remoting.AllowFallback), since it cannot delegate: double-hop
-    # steps may fail unless Kerberos delegation (KCD/RBCD) is configured for the account.
+    # CredSSP first (it delegates the credential for the remote cmdlets' second hop to SQL /
+    # a file share); Negotiate only when explicitly allowed, and it cannot delegate.
     $authChain = @('CredSSP')
     if ($AllowFallback) {
         $authChain += 'Negotiate'
     }
 
-    # Open the remote session, failing clearly instead of silently running the SharePoint
-    # scriptblock on the local server when no session can be established.
     $sessionOption = Get-SPSRemoteSessionOption
     $session = $null
     $lastError = $null
@@ -75,9 +70,8 @@
                 -SessionOption $sessionOption `
                 -ErrorAction Stop
             if ($auth -ne 'CredSSP') {
-                Write-Warning -Message ("CredSSP was unavailable to '$Server'; opened the remote session " + `
-                        "using '$auth' instead. Steps that require a second hop (SQL or a file share) may " + `
-                        "fail unless Kerberos delegation is configured for $($Credential.UserName).")
+                Write-Warning -Message ("CredSSP unavailable to '$Server'; using '$auth'. Second-hop steps " + `
+                        "(SQL / file share) may fail without Kerberos delegation for $($Credential.UserName).")
             }
             break
         }
@@ -89,7 +83,7 @@
 
     if ($null -eq $session) {
         if ($authChain.Count -eq 1) {
-            # Preserve the original CredSSP-only error so strict environments get the same message.
+            # Keep the original CredSSP-only message for strict environments.
             throw "Failed to open a CredSSP PSSession to '$Server': $($lastError.Exception.Message)"
         }
         throw ("Failed to open a remote PSSession to '$Server' using any of: $($authChain -join ', '). " + `

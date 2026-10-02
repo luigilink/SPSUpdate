@@ -192,10 +192,8 @@ function Get-SPSUpdateConfiguration {
         throw "Configuration property 'Reboot.Force' must be a Boolean (`$true or `$false), not '$($config.Reboot.Force)'."
     }
 
-    # Normalize the Remoting block and apply defaults. Remote cmdlets use CredSSP by default
-    # (secure, and required for the double-hop the SharePoint cmdlets perform). Remoting.AllowFallback
-    # is opt-in ($false by default): when $true, Invoke-SPSCommand falls back to Negotiate if the
-    # CredSSP session cannot be opened (for farms with a broken CredSSP configuration).
+    # Remote cmdlets use CredSSP by default; Remoting.AllowFallback (opt-in, off) lets
+    # Invoke-SPSCommand fall back to Negotiate when CredSSP cannot be opened.
     if (-not $config.ContainsKey('Remoting') -or $null -eq $config.Remoting) {
         $config.Remoting = @{}
     }
