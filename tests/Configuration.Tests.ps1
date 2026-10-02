@@ -50,6 +50,12 @@ Describe 'Environment config example (CONTOSO-PROD.example.psd1)' {
         $cfg.Reboot.ContainsKey('Force') | Should -BeTrue
         $cfg.Reboot.Force | Should -BeFalse
     }
+
+    It 'defines a Remoting block with AllowFallback off by default' {
+        $cfg.Remoting | Should -Not -BeNullOrEmpty
+        $cfg.Remoting.ContainsKey('AllowFallback') | Should -BeTrue
+        $cfg.Remoting.AllowFallback | Should -BeFalse
+    }
 }
 
 Describe 'Secrets example (secrets.example.psd1)' {
