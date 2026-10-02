@@ -313,6 +313,7 @@ elseif ($null -ne $cfg -and $cfg.Contains('Domain') -and $cfg.Domain) {
 
         # 6b. Real CredSSP authentication test (needs the decrypted credential from section 3).
         if (-not $winrmOk) {
+            Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'SKIP' -Detail 'WinRM unreachable; CredSSP not tested'
             continue
         }
         if ($null -eq $cred) {
