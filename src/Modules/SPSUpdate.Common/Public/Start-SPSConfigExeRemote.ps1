@@ -60,15 +60,15 @@
         return $psconfig.ExitCode
     }
     # Error codes: https://aka.ms/installerrorcodes
-    switch ($result) {
-        0 {
-            Write-Verbose -Message "SharePoint Post Setup Configuration Wizard ran successfully"
-        }
-        Default {
-            $message = ("SharePoint Post Setup Configuration Wizard failed, " + `
-                    "exit code was $result. Error codes can be found at " + `
-                    "https://aka.ms/installerrorcodes")
-            throw $message
-        }
+    # Do not throw on a non-zero exit code: psconfig reports the exit code for the whole
+    # command chain, so a later sub-command can return non-zero even when the
+    # build-to-build upgrade itself completed. The caller re-checks the authoritative
+    # patch status (see Resolve-SPSWizardOutcome) before declaring a failure. Returning
+    # the exit code keeps this function consistent with Start-SPSConfigExe.
+    if ($result -ne 0) {
+        Write-Warning -Message ("SharePoint Post Setup Configuration Wizard on '$Server' returned a " + `
+                "non-zero exit code ($result). Error codes can be found at " + `
+                "https://aka.ms/installerrorcodes")
     }
+    return $result
 }

@@ -55,6 +55,7 @@ Describe 'SPSUpdate.Common module' {
             'Initialize-SPSContentDbJsonFile'
             'Mount-SPSContentDatabase'
             'Remove-SPSScheduledTask'
+            'Resolve-SPSWizardOutcome'
             'Set-SPSSecret'
             'Set-SPSSideBySideToken'
             'Set-SPSUpdateStatus'

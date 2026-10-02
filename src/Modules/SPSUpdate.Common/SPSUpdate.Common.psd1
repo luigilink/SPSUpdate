@@ -23,6 +23,7 @@
         'Initialize-SPSContentDbJsonFile'
         'Mount-SPSContentDatabase'
         'Remove-SPSScheduledTask'
+        'Resolve-SPSWizardOutcome'
         'Set-SPSSecret'
         'Set-SPSSideBySideToken'
         'Set-SPSUpdateStatus'

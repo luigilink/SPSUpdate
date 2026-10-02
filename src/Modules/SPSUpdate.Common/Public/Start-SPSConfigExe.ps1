@@ -52,18 +52,20 @@
         }
 
         Write-Output "PSConfig Exit Code: $($psconfig.ExitCode)"
+        if ($psconfig.ExitCode -ne 0) {
+            # Do not throw here: a non-zero exit code is reported by psconfig for the whole
+            # command chain, so a later sub-command can return non-zero even when the
+            # build-to-build upgrade itself completed. The caller re-checks the authoritative
+            # patch status (see Resolve-SPSWizardOutcome) before declaring a failure.
+            Write-Warning -Message ("SharePoint Post Setup Configuration Wizard returned a non-zero " + `
+                    "exit code ($($psconfig.ExitCode)). Error codes can be found at " + `
+                    "https://aka.ms/installerrorcodes")
+        }
         return $psconfig.ExitCode
     }
-    # Error codes: https://aka.ms/installerrorcodes
-    switch ($result) {
-        0 {
-            Write-Output "SharePoint Post Setup Configuration Wizard ran successfully"
-        }
-        Default {
-            $message = ("SharePoint Post Setup Configuration Wizard failed, " + `
-                    "exit code was $result. Error codes can be found at " + `
-                    "https://aka.ms/installerrorcodes")
-            throw $message
-        }
-    }
+
+    # The Configuration Wizard is not required on this server (neither a language pack
+    # install nor a B2B upgrade is pending); there is nothing to run, which is success.
+    Write-Output "Configuration Wizard not required on this server; nothing to do."
+    return 0
 }
