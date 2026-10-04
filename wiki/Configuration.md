@@ -260,10 +260,10 @@ Notes:
 - The windows run **Windows PowerShell** (`powershell.exe`), because the SharePoint cmdlets
   require Windows PowerShell 5.1 (the SharePoint snap-in does not load on PowerShell 7).
 - They inherit the caller's identity, so the DPAPI secret is decrypted exactly as the scheduled
-  tasks do. Run SPSUpdate **as the InstallAccount** for interactive mode: the account that
-  created the secret is the only one that can decrypt it (DPAPI), and the parent run already
-  fails fast if the secret cannot be decrypted — so interactive mode effectively requires being
-  signed in as that account. The windows then run with the farm-admin rights they need.
+  tasks do. Interactive mode is used **only when the current user is the configured InstallAccount**
+  (verified by SID): the windows would otherwise run with the wrong farm identity, so if the
+  current account does not match, SPSUpdate automatically **falls back to scheduled tasks** (which
+  run `-ExecuteAsCredential` the stored account) and logs a warning.
 - **Unattended / scheduled runs always use scheduled tasks**, regardless of this setting, because
   interactive windows die when the operator closes the session. Keep runs you launch from a
   scheduled task (or that re-enter with `-Sequence`) on the task path.

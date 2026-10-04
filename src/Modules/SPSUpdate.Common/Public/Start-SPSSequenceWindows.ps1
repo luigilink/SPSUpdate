@@ -84,7 +84,7 @@
         $PowerShellPath = 'powershell.exe'
     )
 
-    $processes = [System.Collections.Generic.List[object]]::new()
+    $launched = [System.Collections.Generic.List[object]]::new()
     for ($i = 1; $i -le $Count; $i++) {
         if (-not $PSCmdlet.ShouldProcess("Sequence $i", "Start PowerShell window")) {
             continue
@@ -94,7 +94,9 @@
         # Terminating on launch failure: a null process would otherwise be silently skipped while
         # the sequence is reported as started and the run would continue without it.
         $proc = Start-Process -FilePath $PowerShellPath -ArgumentList $argumentList -PassThru -ErrorAction Stop
-        $processes.Add($proc)
+        # Track the actual sequence number with the process so a skipped (declined) sequence never
+        # shifts the numbers reported in FailedSequences.
+        $launched.Add([PSCustomObject]@{ Sequence = $i; Process = $proc })
         Write-Verbose -Message "Started sequence $i in a new PowerShell window (PID $($proc.Id))."
         if ($DashboardCallback) { & $DashboardCallback }
 
@@ -113,26 +115,26 @@
     }
 
     # Wait for every window to exit, refreshing the dashboard from the shared status store.
-    $running = @($processes | Where-Object { $_ -and -not $_.HasExited })
+    $running = @($launched | Where-Object { $_.Process -and -not $_.Process.HasExited })
     while ($running.Count -gt 0) {
         if ($DashboardCallback) { & $DashboardCallback }
         Start-Sleep -Seconds $PollSeconds
-        $running = @($processes | Where-Object { $_ -and -not $_.HasExited })
+        $running = @($launched | Where-Object { $_.Process -and -not $_.Process.HasExited })
     }
     if ($DashboardCallback) { & $DashboardCallback }
 
-    # A non-zero exit code (failed worker, or a window closed by the operator) must not be
-    # treated as success; surface it so the caller can log it and avoid masking a failed sequence.
+    # A non-zero exit code (failed worker, or a window closed by the operator) must not be treated
+    # as success; surface the actual sequence number so the caller can log it.
     $failed = [System.Collections.Generic.List[int]]::new()
-    for ($i = 0; $i -lt $processes.Count; $i++) {
-        $exit = $processes[$i].ExitCode
+    foreach ($entry in $launched) {
+        $exit = $entry.Process.ExitCode
         if ($null -ne $exit -and $exit -ne 0) {
-            $failed.Add($i + 1)
+            $failed.Add($entry.Sequence)
         }
     }
 
     return [PSCustomObject]@{
-        Processes       = $processes.ToArray()
+        Processes       = @($launched.Process)
         FailedSequences = $failed.ToArray()
     }
 }

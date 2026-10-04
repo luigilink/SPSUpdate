@@ -1203,6 +1203,13 @@ Exception: $_
                 Write-Error -Message $catchMessage
                 Add-SPSUpdateEvent -Message $catchMessage -Source 'Update-SPSContentDatabase' -EntryType 'Error'
                 Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Failed' -Detail "$($_.Exception.Message)"
+                # Exit non-zero so an orchestrating window run (Start-SPSSequenceWindows) can detect
+                # the failure from the process exit code; the scheduled-task path ignores it.
+                if ($script:TranscriptStarted) {
+                    Stop-Transcript | Out-Null
+                    $script:TranscriptStarted = $false
+                }
+                exit 1
             }
         }
         else {
@@ -1243,6 +1250,27 @@ Exception: $_
                 $useInteractiveSequences = $envCfg.Execution.InteractiveSequences `
                     -and [Environment]::UserInteractive `
                     -and -not $PSBoundParameters.ContainsKey('Sequence')
+
+                if ($useInteractiveSequences) {
+                    # Visible windows run as the interactive operator, not under $credential. Only
+                    # use interactive mode when the operator IS the configured InstallAccount;
+                    # otherwise the windows would run with the wrong farm identity, so fall back to
+                    # scheduled tasks (which run -ExecuteAsCredential $credential). Compare by SID.
+                    $currentName = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+                    $sameIdentity = $false
+                    try {
+                        $currentSid = ([System.Security.Principal.NTAccount]$currentName).Translate([System.Security.Principal.SecurityIdentifier]).Value
+                        $credentialSid = ([System.Security.Principal.NTAccount]$credential.UserName).Translate([System.Security.Principal.SecurityIdentifier]).Value
+                        $sameIdentity = ($currentSid -eq $credentialSid)
+                    }
+                    catch {
+                        $sameIdentity = $false
+                    }
+                    if (-not $sameIdentity) {
+                        Write-Warning "Interactive sequence windows require running as the configured InstallAccount ($($credential.UserName)); current user is $currentName. Falling back to scheduled tasks."
+                        $useInteractiveSequences = $false
+                    }
+                }
 
                 if ($useInteractiveSequences) {
                     Write-Output 'Running the parallel content-database sequences in visible PowerShell windows (Execution.InteractiveSequences).'
