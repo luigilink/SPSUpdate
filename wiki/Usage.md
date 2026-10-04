@@ -243,11 +243,28 @@ dedicated **`SPSUpdate` Windows Event Log** via `Add-SPSUpdateEvent`.
 
 `Test-SPSUpdateReadiness.ps1` validates the environment before a run (read-only). It checks
 the module import, the config keys, the DPAPI secret, elevation, the status store
-reachability and write access, and the per-server WinRM/CredSSP reachability:
+reachability and write access, and the network/remoting prerequisites:
 
 ```powershell
 .\Test-SPSUpdateReadiness.ps1 -ConfigFile 'Config\CONTOSO-PROD-CONTENT.psd1'
 ```
+
+### Network / remoting checks
+
+The `Network` section runs two levels of checks:
+
+- **Local prerequisites** (once, before the per-server loop): the `WinRM` service is
+  **Running** (PASS/FAIL) and `Test-WSMan localhost` responds (PASS/WARN). When the local
+  remoting stack is not configured, these surface the root cause up front — run
+  `Enable-PSRemoting -Force` to remediate — instead of leaving you to infer it from the
+  per-server warnings that follow.
+- **Per-server probes**: WinRM transport reachability, then a real **CredSSP** `New-PSSession`
+  with the decrypted service credential. This reports PASS when CredSSP works, FAIL when it
+  fails and `Remoting.AllowFallback` is off, and WARN when the `Negotiate` fallback works.
+  See [Configuration](./Configuration) for the fallback behaviour.
+
+`-SkipNetwork` skips the whole `Network` section (both the local prerequisites and the
+per-server probes), which is useful when running the check off-server.
 
 It exits non-zero when any check fails, so it can gate an automated rollout.
 
