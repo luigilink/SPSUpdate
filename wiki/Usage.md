@@ -259,9 +259,9 @@ The `Network` section runs two levels of checks:
   `Enable-PSRemoting -Force` to remediate — instead of leaving you to infer it from the
   per-server warnings that follow.
 - **Per-server probes**: WinRM transport reachability, then a real **CredSSP** `New-PSSession`
-  with the decrypted service credential (PASS when CredSSP works, FAIL when it fails and
-  `Remoting.AllowFallback` is off, WARN when the `Negotiate` fallback works — see
-  [Configuration](./Configuration)).
+  with the decrypted service credential. This reports PASS when CredSSP works, FAIL when it
+  fails and `Remoting.AllowFallback` is off, and WARN when the `Negotiate` fallback works.
+  See [Configuration](./Configuration) for the fallback behaviour.
 
 `-SkipNetwork` skips the whole `Network` section (both the local prerequisites and the
 per-server probes), which is useful when running the check off-server.

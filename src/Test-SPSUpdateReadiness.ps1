@@ -19,7 +19,8 @@
     SPSUpdate.ps1). secrets.psd1 is looked up in the same folder.
 
     .PARAMETER SkipNetwork
-    Skip the per-server WinRM/CredSSP reachability probe (useful off-server).
+    Skip the local WinRM prerequisite checks and the per-server WinRM/CredSSP reachability
+    probes (useful off-server).
 
     .PARAMETER SkipSharePoint
     Skip enumerating the farm servers via Get-SPServer.
@@ -263,22 +264,30 @@ Write-Section -Title 'Network'
 # local setup surfaces as one clear cause rather than per-server "Unreachable" warnings.
 if (-not $SkipNetwork) {
     $winrmService = Get-Service -Name 'WinRM' -ErrorAction SilentlyContinue
+    $winrmRunning = $null -ne $winrmService -and $winrmService.Status -eq 'Running'
     if ($null -eq $winrmService) {
         Add-CheckResult -Section 'Network' -Name 'WinRM service' -Status 'FAIL' -Detail 'WinRM service not found; run Enable-PSRemoting -Force'
     }
-    elseif ($winrmService.Status -ne 'Running') {
+    elseif (-not $winrmRunning) {
         Add-CheckResult -Section 'Network' -Name 'WinRM service' -Status 'FAIL' -Detail "WinRM service is $($winrmService.Status); run Enable-PSRemoting -Force (or Start-Service WinRM)"
     }
     else {
         Add-CheckResult -Section 'Network' -Name 'WinRM service' -Status 'PASS' -Detail 'Running'
     }
 
-    try {
-        Test-WSMan -ComputerName localhost -ErrorAction Stop | Out-Null
-        Add-CheckResult -Section 'Network' -Name 'Local PS remoting (Test-WSMan)' -Status 'PASS' -Detail 'WinRM responds on localhost'
+    if (-not $winrmRunning) {
+        # Skip the localhost probe when the service is down: it would only add a redundant WARN
+        # that obscures the primary WinRM service FAIL above.
+        Add-CheckResult -Section 'Network' -Name 'Local PS remoting (Test-WSMan)' -Status 'SKIP' -Detail 'Not tested; WinRM service is not running'
     }
-    catch {
-        Add-CheckResult -Section 'Network' -Name 'Local PS remoting (Test-WSMan)' -Status 'WARN' -Detail "Test-WSMan localhost failed: $($_.Exception.Message); run Enable-PSRemoting -Force"
+    else {
+        try {
+            Test-WSMan -ComputerName localhost -ErrorAction Stop | Out-Null
+            Add-CheckResult -Section 'Network' -Name 'Local PS remoting (Test-WSMan)' -Status 'PASS' -Detail 'WinRM responds on localhost'
+        }
+        catch {
+            Add-CheckResult -Section 'Network' -Name 'Local PS remoting (Test-WSMan)' -Status 'WARN' -Detail "Test-WSMan localhost failed: $($_.Exception.Message); run Enable-PSRemoting -Force"
+        }
     }
 }
 if ($SkipNetwork) {
