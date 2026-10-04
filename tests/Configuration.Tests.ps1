@@ -56,6 +56,12 @@ Describe 'Environment config example (CONTOSO-PROD.example.psd1)' {
         $cfg.Remoting.ContainsKey('AllowFallback') | Should -BeTrue
         $cfg.Remoting.AllowFallback | Should -BeFalse
     }
+
+    It 'defines an Execution block with InteractiveSequences off by default' {
+        $cfg.Execution | Should -Not -BeNullOrEmpty
+        $cfg.Execution.ContainsKey('InteractiveSequences') | Should -BeTrue
+        $cfg.Execution.InteractiveSequences | Should -BeFalse
+    }
 }
 
 Describe 'Secrets example (secrets.example.psd1)' {

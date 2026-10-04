@@ -204,6 +204,18 @@ function Get-SPSUpdateConfiguration {
         throw "Configuration property 'Remoting.AllowFallback' must be a Boolean (`$true or `$false), not '$($config.Remoting.AllowFallback)'."
     }
 
+    # Execution.InteractiveSequences (opt-in, off): in an attended run, launch the parallel
+    # content-database sequences in visible PowerShell windows instead of scheduled tasks.
+    if (-not $config.ContainsKey('Execution') -or $null -eq $config.Execution) {
+        $config.Execution = @{}
+    }
+    if (-not $config.Execution.ContainsKey('InteractiveSequences')) {
+        $config.Execution.InteractiveSequences = $false
+    }
+    elseif ($config.Execution.InteractiveSequences -isnot [bool]) {
+        throw "Configuration property 'Execution.InteractiveSequences' must be a Boolean (`$true or `$false), not '$($config.Execution.InteractiveSequences)'."
+    }
+
     # StatusStorePath is optional; empty string means "use the local Results\status folder".
     if (-not $config.ContainsKey('StatusStorePath') -or $null -eq $config.StatusStorePath) {
         $config.StatusStorePath = ''
@@ -1179,6 +1191,19 @@ Exception: $_
                         Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Running' -Percent $pct -Item "$($db.Name)" -ItemState 'Done' -ItemDetail 'processed'
                     }
                 }
+                if ($dbDone -lt $dbTotal) {
+                    # One or more databases failed (for example a caught mount error). Mark the
+                    # sequence Failed and exit non-zero so an orchestrating window run detects it;
+                    # the scheduled-task path ignores the exit code.
+                    $failedCount = $dbTotal - $dbDone
+                    Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Failed' -Detail "$dbDone/$dbTotal processed; $failedCount failed"
+                    Write-SPSDashboard
+                    if ($script:TranscriptStarted) {
+                        Stop-Transcript | Out-Null
+                        $script:TranscriptStarted = $false
+                    }
+                    exit 1
+                }
                 Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Done' -Percent 100 -Detail "$dbDone/$dbTotal processed"
             }
             catch {
@@ -1191,6 +1216,13 @@ Exception: $_
                 Write-Error -Message $catchMessage
                 Add-SPSUpdateEvent -Message $catchMessage -Source 'Update-SPSContentDatabase' -EntryType 'Error'
                 Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Failed' -Detail "$($_.Exception.Message)"
+                # Exit non-zero so an orchestrating window run (Start-SPSSequenceWindows) can detect
+                # the failure from the process exit code; the scheduled-task path ignores it.
+                if ($script:TranscriptStarted) {
+                    Stop-Transcript | Out-Null
+                    $script:TranscriptStarted = $false
+                }
+                exit 1
             }
         }
         else {
@@ -1225,6 +1257,31 @@ Exception: $_
             # example a dedicated search farm): there is nothing to mount or upgrade, and
             # the dashboard then shows only ProductUpdate, the Wizard and side-by-side.
             if (($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) -and $contentDbTotal -gt 0) {
+                # Attended runs can launch the parallel sequences in visible PowerShell windows
+                # (opt-in Execution.InteractiveSequences). The windows run as the current user, who
+                # is already a farm administrator (they are running SPSUpdate interactively), so no
+                # InstallAccount is needed for the sequences - the content-database cmdlets run under
+                # the operator's own identity. Scheduled tasks remain the default and the only path
+                # for unattended/scheduled runs (which re-enter here with -Sequence).
+                $useInteractiveSequences = $envCfg.Execution.InteractiveSequences `
+                    -and [Environment]::UserInteractive `
+                    -and -not $PSBoundParameters.ContainsKey('Sequence')
+
+                if ($useInteractiveSequences) {
+                    Write-Output 'Running the parallel content-database sequences in visible PowerShell windows (Execution.InteractiveSequences).'
+                    $seqResult = Start-SPSSequenceWindows -ScriptPath $fullScriptPath -ConfigFile $ConfigFile -DashboardCallback { Write-SPSDashboard }
+                    Write-SPSDashboard
+                    if (@($seqResult.FailedSequences).Count -gt 0) {
+                        $failedList = $seqResult.FailedSequences -join ', '
+                        $catchMessage = "Interactive sequence window(s) returned a non-zero exit code: Sequence $failedList. Check the per-sequence logs and the dashboard."
+                        Write-Error -Message $catchMessage
+                        Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSSequenceWindows' -EntryType 'Error'
+                    }
+                    else {
+                        Write-Output 'All sequence windows have finished'
+                    }
+                }
+                else {
                 # Add scheduled Task for Upgrade SPContentDatabase in Parallel
                 foreach ($taskId in (1..4)) {
                     try {
@@ -1335,6 +1392,7 @@ Exception: $_
                     }
                 }
                 Write-Output "All Scheduled Tasks have finished"
+                }
             }
             elseif ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) {
                 Write-Output 'No content database on this farm (for example a dedicated search farm); skipping the mount/upgrade sequences.'

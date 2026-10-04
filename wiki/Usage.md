@@ -112,10 +112,14 @@ Export-SPSUpdateDbReport -InputFile '.\Config\contoso-PROD-CONTENT-ContentDBs.js
 ## How a full run works (`Default`)
 
 1. Reads the `InstallAccount` credential from `secrets.psd1` (DPAPI).
-2. If `UpgradeContentDatabase` or `MountContentDatabase` is on, registers and starts four
-   `SPSUpdate-Sequence1..4` scheduled tasks that process the content-database groups in
-   parallel (the groups are balanced by size using a Longest-Processing-Time heuristic),
-   then waits for all four to finish.
+2. If `UpgradeContentDatabase` or `MountContentDatabase` is on, processes the four
+   content-database groups in parallel (the groups are balanced by size using a
+   Longest-Processing-Time heuristic), then waits for all four to finish. By default this uses
+   four `SPSUpdate-Sequence1..4` **scheduled tasks** (running as the InstallAccount). When
+   `Execution.InteractiveSequences` is enabled **and** the run is attended, the four groups run
+   in visible **PowerShell windows** under the current user instead — see
+   [Execution (interactive sequence windows)](./Configuration#execution-interactive-sequence-windows).
+   Unattended/scheduled runs always use the scheduled tasks.
 3. Runs PSConfig on the local (master) server when a patch action is required, then on each
    remote server over CredSSP.
 4. Configures the side-by-side token and copies side-by-side files (when enabled).
