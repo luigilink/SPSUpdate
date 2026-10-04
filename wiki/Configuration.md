@@ -260,16 +260,11 @@ Notes:
 - The windows run **Windows PowerShell** (`powershell.exe`), because the SharePointServer module
   (Subscription Edition) targets the full .NET Framework and runs on Windows PowerShell 5.1, not
   PowerShell 7.
-- They inherit the caller's identity, so interactive mode is used **only when the current user is
-  the configured InstallAccount** (verified by SID); otherwise the windows would run with the wrong
-  farm identity. The exact behaviour depends on the account:
-  - **A different user who did not create the secret**: SPSUpdate loads the DPAPI secret before the
-    identity check, and DPAPI decryption fails for anyone other than the account that created it, so
-    the run **fails fast at security initialization** — it never reaches the interactive branch.
-  - **Signed in as the secret creator, but the stored InstallAccount is a different account**: the
-    secret decrypts, the SID check detects the mismatch, SPSUpdate logs a warning and
-    **falls back to scheduled tasks** (which run `-ExecuteAsCredential` the stored account).
-  - **Signed in as the InstallAccount**: the windows run interactively with the correct identity.
+- They run as the **current user**, who is already a farm administrator when running SPSUpdate
+  interactively. The content-database sequences run under that identity, so **no InstallAccount is
+  needed** for interactive mode — unlike the scheduled-task path, which must be told which account
+  to run as (`-ExecuteAsCredential`). Make sure the signed-in operator has the usual farm-admin and
+  content-database rights.
 - **Unattended / scheduled runs always use scheduled tasks**, regardless of this setting, because
   interactive windows die when the operator closes the session. Keep runs you launch from a
   scheduled task (or that re-enter with `-Sequence`) on the task path.

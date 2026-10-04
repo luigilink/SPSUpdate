@@ -7,9 +7,9 @@
         Interactive alternative to the scheduled-task orchestration used by the Default action.
         Each sequence is launched as a separate visible Windows PowerShell process
         (SPSUpdate.ps1 -Sequence N) so an operator running an attended patching campaign sees
-        per-sequence progress live. The windows inherit the caller's identity, so the DPAPI
-        secret is decrypted exactly as the scheduled tasks do when the session runs as the
-        InstallAccount.
+        per-sequence progress live. The windows run as the current user (who is already a farm
+        administrator when running SPSUpdate interactively); the content-database cmdlets run under
+        that identity, so no InstallAccount credential is involved in the sequences.
 
         Starts are staggered to avoid OWSTimer conflicts and the caller's dashboard refresh is
         invoked (via DashboardCallback) between starts and while waiting, so the live dashboard

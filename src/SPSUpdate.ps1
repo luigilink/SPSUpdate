@@ -1258,32 +1258,14 @@ Exception: $_
             # the dashboard then shows only ProductUpdate, the Wizard and side-by-side.
             if (($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) -and $contentDbTotal -gt 0) {
                 # Attended runs can launch the parallel sequences in visible PowerShell windows
-                # (opt-in Execution.InteractiveSequences); scheduled tasks remain the default and
-                # the only path for unattended/scheduled runs (which re-enter here with -Sequence).
+                # (opt-in Execution.InteractiveSequences). The windows run as the current user, who
+                # is already a farm administrator (they are running SPSUpdate interactively), so no
+                # InstallAccount is needed for the sequences - the content-database cmdlets run under
+                # the operator's own identity. Scheduled tasks remain the default and the only path
+                # for unattended/scheduled runs (which re-enter here with -Sequence).
                 $useInteractiveSequences = $envCfg.Execution.InteractiveSequences `
                     -and [Environment]::UserInteractive `
                     -and -not $PSBoundParameters.ContainsKey('Sequence')
-
-                if ($useInteractiveSequences) {
-                    # Visible windows run as the interactive operator, not under $credential. Only
-                    # use interactive mode when the operator IS the configured InstallAccount;
-                    # otherwise the windows would run with the wrong farm identity, so fall back to
-                    # scheduled tasks (which run -ExecuteAsCredential $credential). Compare by SID.
-                    $currentName = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-                    $sameIdentity = $false
-                    try {
-                        $currentSid = ([System.Security.Principal.NTAccount]$currentName).Translate([System.Security.Principal.SecurityIdentifier]).Value
-                        $credentialSid = ([System.Security.Principal.NTAccount]$credential.UserName).Translate([System.Security.Principal.SecurityIdentifier]).Value
-                        $sameIdentity = ($currentSid -eq $credentialSid)
-                    }
-                    catch {
-                        $sameIdentity = $false
-                    }
-                    if (-not $sameIdentity) {
-                        Write-Warning "Interactive sequence windows require running as the configured InstallAccount ($($credential.UserName)); current user is $currentName. Falling back to scheduled tasks."
-                        $useInteractiveSequences = $false
-                    }
-                }
 
                 if ($useInteractiveSequences) {
                     Write-Output 'Running the parallel content-database sequences in visible PowerShell windows (Execution.InteractiveSequences).'
