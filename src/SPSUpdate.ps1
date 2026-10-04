@@ -204,6 +204,18 @@ function Get-SPSUpdateConfiguration {
         throw "Configuration property 'Remoting.AllowFallback' must be a Boolean (`$true or `$false), not '$($config.Remoting.AllowFallback)'."
     }
 
+    # Execution.InteractiveSequences (opt-in, off): in an attended run, launch the parallel
+    # content-database sequences in visible PowerShell windows instead of scheduled tasks.
+    if (-not $config.ContainsKey('Execution') -or $null -eq $config.Execution) {
+        $config.Execution = @{}
+    }
+    if (-not $config.Execution.ContainsKey('InteractiveSequences')) {
+        $config.Execution.InteractiveSequences = $false
+    }
+    elseif ($config.Execution.InteractiveSequences -isnot [bool]) {
+        throw "Configuration property 'Execution.InteractiveSequences' must be a Boolean (`$true or `$false), not '$($config.Execution.InteractiveSequences)'."
+    }
+
     # StatusStorePath is optional; empty string means "use the local Results\status folder".
     if (-not $config.ContainsKey('StatusStorePath') -or $null -eq $config.StatusStorePath) {
         $config.StatusStorePath = ''
@@ -1225,6 +1237,31 @@ Exception: $_
             # example a dedicated search farm): there is nothing to mount or upgrade, and
             # the dashboard then shows only ProductUpdate, the Wizard and side-by-side.
             if (($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) -and $contentDbTotal -gt 0) {
+                # Attended runs can launch the parallel sequences in visible PowerShell windows
+                # (opt-in Execution.InteractiveSequences); scheduled tasks remain the default and
+                # the only path for unattended/scheduled runs (which re-enter here with -Sequence).
+                $useInteractiveSequences = $envCfg.Execution.InteractiveSequences `
+                    -and [Environment]::UserInteractive `
+                    -and -not $PSBoundParameters.ContainsKey('Sequence')
+
+                if ($useInteractiveSequences) {
+                    Write-Output 'Running the parallel content-database sequences in visible PowerShell windows (Execution.InteractiveSequences).'
+                    $seqProcesses = Start-SPSSequenceWindows -ScriptPath $fullScriptPath -ConfigFile $ConfigFile
+                    Write-SPSDashboard
+
+                    # Wait for every window to exit, refreshing the live dashboard from the shared
+                    # status store (each window writes its per-database progress there).
+                    $running = @($seqProcesses | Where-Object { $_ -and -not $_.HasExited })
+                    while ($running.Count -gt 0) {
+                        Write-SPSDashboard
+                        Write-Output "$($running.Count) sequence window(s) still running..."
+                        Start-Sleep -Seconds 10
+                        $running = @($seqProcesses | Where-Object { $_ -and -not $_.HasExited })
+                    }
+                    Write-SPSDashboard
+                    Write-Output 'All sequence windows have finished'
+                }
+                else {
                 # Add scheduled Task for Upgrade SPContentDatabase in Parallel
                 foreach ($taskId in (1..4)) {
                     try {
@@ -1335,6 +1372,7 @@ Exception: $_
                     }
                 }
                 Write-Output "All Scheduled Tasks have finished"
+                }
             }
             elseif ($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase) {
                 Write-Output 'No content database on this farm (for example a dedicated search farm); skipping the mount/upgrade sequences.'

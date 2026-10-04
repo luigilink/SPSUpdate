@@ -140,4 +140,14 @@
         # Possible values : $true | $false.   Default if omitted: $false
         AllowFallback = $false
     }
+
+    # --- Execution (OPTIONAL block; controls how the parallel sequences run) -----------
+    Execution              = @{
+        # InteractiveSequences : when $true, an attended (interactive) run launches the four
+        # parallel content-database sequences in visible PowerShell windows instead of hidden
+        # scheduled tasks, so you can watch per-sequence progress live. Unattended/scheduled
+        # runs always use scheduled tasks regardless of this setting.
+        # Possible values : $true | $false.   Default if omitted: $false
+        InteractiveSequences = $false
+    }
 }

@@ -63,6 +63,7 @@ Describe 'SPSUpdate.Common module' {
             'Start-SPSConfigExeRemote'
             'Start-SPSProductUpdate'
             'Start-SPSScheduledTask'
+            'Start-SPSSequenceWindows'
             'Test-SPSPendingReboot'
             'Test-SPSScheduleWindow'
             'Update-SPSContentDatabase'

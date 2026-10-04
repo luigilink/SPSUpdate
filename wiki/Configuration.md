@@ -239,6 +239,33 @@ each server and reports **PASS** (CredSSP works), **FAIL** (CredSSP failed and
 `AllowFallback` is off), or **WARN** (CredSSP failed but the Negotiate fallback works — mind the
 double-hop caveat).
 
+## Execution (interactive sequence windows)
+
+By default, the four parallel content-database sequences run as hidden **scheduled tasks**. In
+an attended patching campaign you can instead run them in **visible Windows PowerShell windows**
+so you can watch each sequence's progress live:
+
+```powershell
+Execution = @{
+    InteractiveSequences = $true   # visible windows in an attended run; tasks otherwise
+}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `Execution.InteractiveSequences` | When `$true` **and** the run is attended (interactive session, not launched by a scheduled task), launch the sequences in visible PowerShell windows instead of scheduled tasks. | `$false` |
+
+Notes:
+
+- The windows run **Windows PowerShell** (`powershell.exe`), because the SharePoint cmdlets
+  require Windows PowerShell 5.1 (the SharePoint snap-in does not load on PowerShell 7).
+- They inherit the caller's identity, so the DPAPI secret is decrypted exactly as the scheduled
+  tasks do — run SPSUpdate as the **InstallAccount** (or pass `-InstallAccount`) so the windows
+  have the farm-admin rights they need.
+- **Unattended / scheduled runs always use scheduled tasks**, regardless of this setting, because
+  interactive windows die when the operator closes the session. Keep runs you launch from a
+  scheduled task (or that re-enter with `-Sequence`) on the task path.
+
 ## Next Step
 
 For the next steps, go to the [Usage](./Usage) page.
