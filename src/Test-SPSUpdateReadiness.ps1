@@ -259,6 +259,28 @@ else {
 
 # 6. Network / CredSSP reachability
 Write-Section -Title 'Network'
+# Local WinRM / PS remoting prerequisite, checked before the per-server probes so a missing
+# local setup surfaces as one clear cause rather than per-server "Unreachable" warnings.
+if (-not $SkipNetwork) {
+    $winrmService = Get-Service -Name 'WinRM' -ErrorAction SilentlyContinue
+    if ($null -eq $winrmService) {
+        Add-CheckResult -Section 'Network' -Name 'WinRM service' -Status 'FAIL' -Detail 'WinRM service not found; run Enable-PSRemoting -Force'
+    }
+    elseif ($winrmService.Status -ne 'Running') {
+        Add-CheckResult -Section 'Network' -Name 'WinRM service' -Status 'FAIL' -Detail "WinRM service is $($winrmService.Status); run Enable-PSRemoting -Force (or Start-Service WinRM)"
+    }
+    else {
+        Add-CheckResult -Section 'Network' -Name 'WinRM service' -Status 'PASS' -Detail 'Running'
+    }
+
+    try {
+        Test-WSMan -ComputerName localhost -ErrorAction Stop | Out-Null
+        Add-CheckResult -Section 'Network' -Name 'Local PS remoting (Test-WSMan)' -Status 'PASS' -Detail 'WinRM responds on localhost'
+    }
+    catch {
+        Add-CheckResult -Section 'Network' -Name 'Local PS remoting (Test-WSMan)' -Status 'WARN' -Detail "Test-WSMan localhost failed: $($_.Exception.Message); run Enable-PSRemoting -Force"
+    }
+}
 if ($SkipNetwork) {
     Add-CheckResult -Section 'Network' -Name 'Farm reachability' -Status 'SKIP' -Detail '-SkipNetwork specified'
 }
