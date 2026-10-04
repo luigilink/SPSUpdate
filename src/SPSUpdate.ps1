@@ -1246,39 +1246,17 @@ Exception: $_
 
                 if ($useInteractiveSequences) {
                     Write-Output 'Running the parallel content-database sequences in visible PowerShell windows (Execution.InteractiveSequences).'
-                    $seqProcesses = @()
-                    foreach ($seqId in (1..4)) {
-                        $proc = Start-SPSSequenceWindow -ScriptPath $fullScriptPath -ConfigFile $ConfigFile -Sequence $seqId
-                        if ($null -ne $proc) { $seqProcesses += $proc }
-                        Write-Output "Started sequence $seqId in a new PowerShell window."
-                        Write-SPSDashboard
-
-                        # Stagger starts to avoid OWSTimer conflicts (except after the last window),
-                        # refreshing the live dashboard every ~10s during the pause.
-                        if ($seqId -lt 4) {
-                            $pauseSeconds = (Get-Random -Minimum 60 -Maximum 91)
-                            Write-Output "Avoid conflicts with OWSTimer process - Pause $pauseSeconds seconds"
-                            $waited = 0
-                            while ($waited -lt $pauseSeconds) {
-                                $chunk = [System.Math]::Min(10, ($pauseSeconds - $waited))
-                                Start-Sleep -Seconds $chunk
-                                $waited += $chunk
-                                Write-SPSDashboard
-                            }
-                        }
-                    }
-
-                    # Wait for every window to exit, refreshing the live dashboard from the shared
-                    # status store (each window writes its per-database progress there).
-                    $running = @($seqProcesses | Where-Object { $_ -and -not $_.HasExited })
-                    while ($running.Count -gt 0) {
-                        Write-SPSDashboard
-                        Write-Output "$($running.Count) sequence window(s) still running..."
-                        Start-Sleep -Seconds 10
-                        $running = @($seqProcesses | Where-Object { $_ -and -not $_.HasExited })
-                    }
+                    $seqResult = Start-SPSSequenceWindows -ScriptPath $fullScriptPath -ConfigFile $ConfigFile -DashboardCallback { Write-SPSDashboard }
                     Write-SPSDashboard
-                    Write-Output 'All sequence windows have finished'
+                    if (@($seqResult.FailedSequences).Count -gt 0) {
+                        $failedList = $seqResult.FailedSequences -join ', '
+                        $catchMessage = "Interactive sequence window(s) returned a non-zero exit code: Sequence $failedList. Check the per-sequence logs and the dashboard."
+                        Write-Error -Message $catchMessage
+                        Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSSequenceWindows' -EntryType 'Error'
+                    }
+                    else {
+                        Write-Output 'All sequence windows have finished'
+                    }
                 }
                 else {
                 # Add scheduled Task for Upgrade SPContentDatabase in Parallel
