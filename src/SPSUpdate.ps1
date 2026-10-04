@@ -192,6 +192,18 @@ function Get-SPSUpdateConfiguration {
         throw "Configuration property 'Reboot.Force' must be a Boolean (`$true or `$false), not '$($config.Reboot.Force)'."
     }
 
+    # Remote cmdlets use CredSSP by default; Remoting.AllowFallback (opt-in, off) lets
+    # Invoke-SPSCommand fall back to Negotiate when CredSSP cannot be opened.
+    if (-not $config.ContainsKey('Remoting') -or $null -eq $config.Remoting) {
+        $config.Remoting = @{}
+    }
+    if (-not $config.Remoting.ContainsKey('AllowFallback')) {
+        $config.Remoting.AllowFallback = $false
+    }
+    elseif ($config.Remoting.AllowFallback -isnot [bool]) {
+        throw "Configuration property 'Remoting.AllowFallback' must be a Boolean (`$true or `$false), not '$($config.Remoting.AllowFallback)'."
+    }
+
     # StatusStorePath is optional; empty string means "use the local Results\status folder".
     if (-not $config.ContainsKey('StatusStorePath') -or $null -eq $config.StatusStorePath) {
         $config.StatusStorePath = ''
@@ -1380,7 +1392,7 @@ Exception: $_
                         $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
                         Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State 'Running' -Detail 'Running PSConfig (remote)'
                         Write-SPSDashboard
-                        $wizResultRemote = Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential
+                        $wizResultRemote = Start-SPSConfigExeRemote -Server $spTargetServer -InstallAccount $credential -AllowFallback:$envCfg.Remoting.AllowFallback
                         $wizOutcomeRemote = Resolve-SPSWizardOutcome -ExitCode $wizResultRemote -Server "$($spServer.Name)"
                         Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($spServer.Name)" -State $wizOutcomeRemote.State -Detail $wizOutcomeRemote.Detail
                         if ($wizOutcomeRemote.State -eq 'Failed') {
@@ -1436,7 +1448,7 @@ Exception: $_
                 foreach ($spServer in $spServers) {
                     try {
                         $spTargetServer = "$($spServer.Name).$($scriptFQDN)"
-                        Copy-SPSSideBySideFilesRemote -Server $spTargetServer -InstallAccount $credential
+                        Copy-SPSSideBySideFilesRemote -Server $spTargetServer -InstallAccount $credential -AllowFallback:$envCfg.Remoting.AllowFallback
                         Write-SPSStatus -Scope 'SideBySide' -Phase 'SideBySide' -Server "$($spServer.Name)" -State 'Done' -Detail 'Side-by-side files copied'
                     }
                     catch {

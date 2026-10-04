@@ -8,7 +8,11 @@
 
         [Parameter()]
         [System.Management.Automation.PSCredential]
-        $InstallAccount
+        $InstallAccount,
+
+        [Parameter()]
+        [Switch]
+        $AllowFallback
     )
 
     # SharePoint Server Subscription Edition installs under the 16.0 hive.
@@ -19,6 +23,7 @@
     Write-Verbose -Message "Starting Configuration Wizard on server: $Server"
     $result = Invoke-SPSCommand -Credential $InstallAccount `
         -Server $Server `
+        -AllowFallback:$AllowFallback `
         -Arguments $psconfigExe `
         -ScriptBlock {
 

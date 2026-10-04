@@ -282,18 +282,71 @@ elseif ($null -ne $cfg -and $cfg.Contains('Domain') -and $cfg.Domain) {
         Add-CheckResult -Section 'Network' -Name 'Farm server enumeration' -Status 'SKIP' -Detail 'SharePoint not loaded; cannot enumerate servers'
     }
 
+    # Remoting.AllowFallback is read raw here; default to the secure $false and reject a
+    # non-Boolean value (which Get-SPSUpdateConfiguration also rejects at run time).
+    $allowFallback = $false
+    if ($null -ne $cfg -and $cfg.Contains('Remoting') -and $cfg.Remoting -and $cfg.Remoting.Contains('AllowFallback')) {
+        if ($cfg.Remoting.AllowFallback -is [bool]) {
+            $allowFallback = $cfg.Remoting.AllowFallback
+        }
+        else {
+            Add-CheckResult -Section 'Network' -Name 'Remoting.AllowFallback' -Status 'FAIL' -Detail "Must be a Boolean (`$true/`$false); the run will reject '$($cfg.Remoting.AllowFallback)'"
+        }
+    }
+
     foreach ($target in ($targets | Sort-Object -Unique)) {
+        # 6a. WinRM transport reachability, using the interactive identity (informational only).
         $cim = $null
         try {
             $opt = New-CimSessionOption -Protocol Wsman
             $cim = New-CimSession -ComputerName $target -OperationTimeoutSec $TimeoutSeconds -SessionOption $opt -ErrorAction Stop
-            Add-CheckResult -Section 'Network' -Name "WinRM to $target" -Status 'PASS' -Detail 'Confirm CredSSP is enabled for the full run'
+            Add-CheckResult -Section 'Network' -Name "WinRM to $target" -Status 'PASS' -Detail 'WinRM reachable'
         }
         catch {
             Add-CheckResult -Section 'Network' -Name "WinRM to $target" -Status 'WARN' -Detail "Unreachable within ${TimeoutSeconds}s: $($_.Exception.Message)"
         }
         finally {
             if ($cim) { Remove-CimSession -CimSession $cim -ErrorAction SilentlyContinue }
+        }
+
+        # 6b. Real CredSSP test with the service credential. This is independent of the transport
+        # probe above (which uses the interactive identity), so always attempt it when $cred is
+        # available - a CredSSP session can succeed even if the interactive WinRM probe warned.
+        if ($null -eq $cred) {
+            Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'SKIP' -Detail 'No decrypted credential available (see Secrets); cannot test CredSSP'
+            continue
+        }
+
+        $sessionOpt = New-PSSessionOption -OpenTimeout ($TimeoutSeconds * 1000)
+        $credsspSession = $null
+        try {
+            $credsspSession = New-PSSession -ComputerName $target -Credential $cred -Authentication CredSSP `
+                -SessionOption $sessionOpt -ErrorAction Stop
+            Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'PASS' -Detail "CredSSP session opened as $($cred.UserName)"
+        }
+        catch {
+            $credsspError = $_.Exception.Message
+            if (-not $allowFallback) {
+                Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'FAIL' -Detail "CredSSP failed and Remoting.AllowFallback is off: $credsspError"
+            }
+            else {
+                # Fallback enabled: confirm Negotiate works so the operator knows the run can proceed.
+                $negSession = $null
+                try {
+                    $negSession = New-PSSession -ComputerName $target -Credential $cred -Authentication Negotiate `
+                        -SessionOption $sessionOpt -ErrorAction Stop
+                    Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'WARN' -Detail "CredSSP failed; Negotiate fallback works, but double-hop steps (SQL/file share) may fail without Kerberos delegation: $credsspError"
+                }
+                catch {
+                    Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'FAIL' -Detail "Both CredSSP and Negotiate failed. CredSSP: $credsspError | Negotiate: $($_.Exception.Message)"
+                }
+                finally {
+                    if ($negSession) { Remove-PSSession -Session $negSession -ErrorAction SilentlyContinue }
+                }
+            }
+        }
+        finally {
+            if ($credsspSession) { Remove-PSSession -Session $credsspSession -ErrorAction SilentlyContinue }
         }
     }
 }

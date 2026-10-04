@@ -15,7 +15,11 @@
 
         [Parameter(Mandatory = $true)]
         [System.String]
-        $Server # Target server where the commands will be executed
+        $Server, # Target server where the commands will be executed
+
+        [Parameter()]
+        [Switch]
+        $AllowFallback # When set, fall back to Negotiate if the CredSSP session cannot be opened
     )
     $VerbosePreference = 'Continue'
 
@@ -41,27 +45,52 @@
         throw 'You need to specify a Credential'
     }
 
-    Write-Verbose -Message ("Executing on '$Server' using a CredSSP PSSession " + `
-            "as user $($Credential.UserName)")
+    Write-Verbose -Message ("Executing on '$Server' as user $($Credential.UserName) " + `
+            "(CredSSP preferred$(if ($AllowFallback) { ', Negotiate fallback enabled' }))")
 
     # Running garbage collection to resolve issues related to Azure DSC extension use
     [GC]::Collect()
 
-    # Open the remote session, failing clearly instead of silently running the
-    # SharePoint scriptblock on the local server when the CredSSP session cannot be
-    # established (e.g. CredSSP not configured, or the target server is unreachable).
-    try {
-        $session = New-PSSession -ComputerName $Server `
-            -Credential $Credential `
-            -Authentication CredSSP `
-            -Name "Microsoft.SharePoint.PSSession" `
-            -SessionOption (New-PSSessionOption -OperationTimeout 0 `
-                -IdleTimeout 60000 `
-                -OpenTimeout 30000) `
-            -ErrorAction Stop
+    # CredSSP first (it delegates the credential for the remote cmdlets' second hop to SQL /
+    # a file share); Negotiate only when explicitly allowed, and it cannot delegate.
+    $authChain = @('CredSSP')
+    if ($AllowFallback) {
+        $authChain += 'Negotiate'
     }
-    catch {
-        throw "Failed to open a CredSSP PSSession to '$Server': $($_.Exception.Message)"
+
+    $sessionOption = Get-SPSRemoteSessionOption
+    $session = $null
+    $lastError = $null
+    $authErrors = [System.Collections.Generic.List[string]]::new()
+    foreach ($auth in $authChain) {
+        try {
+            $session = New-PSSession -ComputerName $Server `
+                -Credential $Credential `
+                -Authentication $auth `
+                -Name "Microsoft.SharePoint.PSSession" `
+                -SessionOption $sessionOption `
+                -ErrorAction Stop
+            if ($auth -ne 'CredSSP') {
+                Write-Warning -Message ("CredSSP unavailable to '$Server'; using '$auth'. Second-hop steps " + `
+                        "(SQL / file share) may fail without Kerberos delegation for $($Credential.UserName).")
+            }
+            break
+        }
+        catch {
+            $lastError = $_
+            $authErrors.Add("${auth}: $($_.Exception.Message)")
+            Write-Warning -Message "Failed to open a '$auth' PSSession to '$Server': $($_.Exception.Message)"
+        }
+    }
+
+    if ($null -eq $session) {
+        if ($authChain.Count -eq 1) {
+            # Keep the original CredSSP-only message for strict environments.
+            throw "Failed to open a CredSSP PSSession to '$Server': $($lastError.Exception.Message)"
+        }
+        # Keep every method's error so a broken CredSSP setup and the fallback failure are both visible.
+        throw ("Failed to open a remote PSSession to '$Server' using any of: $($authChain -join ', '). " + `
+                "Errors - $($authErrors -join ' | ')")
     }
 
     $invokeArgs.Add("Session", $session)

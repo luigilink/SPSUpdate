@@ -59,6 +59,7 @@ If an optional key is omitted, SPSUpdate applies a safe default:
 | `MountContentDatabase` | `$true` / `$false` | `$false` |
 | `SideBySideToken.Enable` | `$true` / `$false` | `$false` |
 | `SideBySideToken.BuildVersion` | `''` or a build, e.g. `'16.0.17928.20238'` | `''` (skip) |
+| `Remoting.AllowFallback` | `$true` / `$false` | `$false` |
 
 `Binaries.SetupFullPath` and `Binaries.SetupFileName` are required as soon as
 `ProductUpdate` is `$true`.
@@ -206,6 +207,37 @@ upgrade phase never appears on the dashboard (the ProductUpdate and Wizard secti
 by your interactive/master run under your own account, still show — which can hide the
 problem). Run `Test-SPSUpdateReadiness.ps1` to verify both your account and the InstallAccount
 can write to the store before patching.
+
+## Remoting (CredSSP and authentication fallback)
+
+SPSUpdate runs the Configuration Wizard and side-by-side copy on **other** farm servers over
+PowerShell remoting. By default it uses **CredSSP**, which is required because the remote
+SharePoint cmdlets perform a *second hop* (to the configuration database on SQL, or to a
+binaries file share) and CredSSP is the mechanism that delegates the credential for that hop.
+
+The optional `Remoting` block controls what happens when the CredSSP session cannot be opened
+(for example on a farm where CredSSP was never configured):
+
+```powershell
+Remoting = @{
+    AllowFallback = $false   # $true to fall back to Negotiate when CredSSP fails
+}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `Remoting.AllowFallback` | When `$true`, fall back to **Negotiate** if the CredSSP session cannot be opened. CredSSP is always tried first. | `$false` |
+
+> **Security / behaviour note.** `Negotiate` (Kerberos with an NTLM fallback) **cannot delegate**
+> the credential, so steps that need a second hop may fail unless **Kerberos constrained
+> delegation (KCD/RBCD)** is configured for the service account. The fallback is a best-effort
+> aid for farms with a broken CredSSP configuration, not a replacement for it — a warning is
+> always logged when the fallback is used. Leave it **off** in secure/strict environments.
+
+`Test-SPSUpdateReadiness.ps1` tests this for you: it opens a real short-lived CredSSP session to
+each server and reports **PASS** (CredSSP works), **FAIL** (CredSSP failed and
+`AllowFallback` is off), or **WARN** (CredSSP failed but the Negotiate fallback works — mind the
+double-hop caveat).
 
 ## Next Step
 
