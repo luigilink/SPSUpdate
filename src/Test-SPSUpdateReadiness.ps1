@@ -295,13 +295,11 @@ elseif ($null -ne $cfg -and $cfg.Contains('Domain') -and $cfg.Domain) {
     }
 
     foreach ($target in ($targets | Sort-Object -Unique)) {
-        # 6a. WinRM reachability (transport-level check).
+        # 6a. WinRM transport reachability, using the interactive identity (informational only).
         $cim = $null
-        $winrmOk = $false
         try {
             $opt = New-CimSessionOption -Protocol Wsman
             $cim = New-CimSession -ComputerName $target -OperationTimeoutSec $TimeoutSeconds -SessionOption $opt -ErrorAction Stop
-            $winrmOk = $true
             Add-CheckResult -Section 'Network' -Name "WinRM to $target" -Status 'PASS' -Detail 'WinRM reachable'
         }
         catch {
@@ -311,11 +309,9 @@ elseif ($null -ne $cfg -and $cfg.Contains('Domain') -and $cfg.Domain) {
             if ($cim) { Remove-CimSession -CimSession $cim -ErrorAction SilentlyContinue }
         }
 
-        # 6b. Real CredSSP authentication test (needs the decrypted credential from section 3).
-        if (-not $winrmOk) {
-            Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'SKIP' -Detail 'WinRM unreachable; CredSSP not tested'
-            continue
-        }
+        # 6b. Real CredSSP test with the service credential. This is independent of the transport
+        # probe above (which uses the interactive identity), so always attempt it when $cred is
+        # available - a CredSSP session can succeed even if the interactive WinRM probe warned.
         if ($null -eq $cred) {
             Add-CheckResult -Section 'Network' -Name "CredSSP to $target" -Status 'SKIP' -Detail 'No decrypted credential available (see Secrets); cannot test CredSSP'
             continue
