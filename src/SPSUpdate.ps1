@@ -1191,6 +1191,19 @@ Exception: $_
                         Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Running' -Percent $pct -Item "$($db.Name)" -ItemState 'Done' -ItemDetail 'processed'
                     }
                 }
+                if ($dbDone -lt $dbTotal) {
+                    # One or more databases failed (for example a caught mount error). Mark the
+                    # sequence Failed and exit non-zero so an orchestrating window run detects it;
+                    # the scheduled-task path ignores the exit code.
+                    $failedCount = $dbTotal - $dbDone
+                    Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Failed' -Detail "$dbDone/$dbTotal processed; $failedCount failed"
+                    Write-SPSDashboard
+                    if ($script:TranscriptStarted) {
+                        Stop-Transcript | Out-Null
+                        $script:TranscriptStarted = $false
+                    }
+                    exit 1
+                }
                 Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Done' -Percent 100 -Detail "$dbDone/$dbTotal processed"
             }
             catch {

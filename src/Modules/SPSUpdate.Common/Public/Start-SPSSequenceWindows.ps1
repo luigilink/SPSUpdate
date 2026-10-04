@@ -39,8 +39,8 @@
 
     .PARAMETER PowerShellPath
         PowerShell host used to run each window. Defaults to Windows PowerShell (powershell.exe)
-        because the SharePoint snap-in requires Windows PowerShell 5.1 and does not load on
-        PowerShell 7.
+        because the SharePointServer module (SharePoint Server Subscription Edition) targets the
+        full .NET Framework and runs on Windows PowerShell 5.1, not PowerShell 7.
 
     .OUTPUTS
         A PSCustomObject with Processes (the started processes) and FailedSequences (the sequence
