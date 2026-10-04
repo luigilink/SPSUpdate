@@ -31,7 +31,7 @@
         'Start-SPSConfigExeRemote'
         'Start-SPSProductUpdate'
         'Start-SPSScheduledTask'
-        'Start-SPSSequenceWindows'
+        'Start-SPSSequenceWindow'
         'Test-SPSPendingReboot'
         'Test-SPSScheduleWindow'
         'Update-SPSContentDatabase'
