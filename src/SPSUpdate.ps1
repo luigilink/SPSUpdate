@@ -345,7 +345,7 @@ function Write-SPSStatus {
 
 # Local helper: (re)generate the live dashboard from the status store.
 function Write-SPSDashboard {
-    param([switch] $Completed)
+    param([switch] $Completed, [switch] $InitialPublish)
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     try {
         $params = @{
@@ -381,15 +381,19 @@ function Write-SPSDashboard {
         # 100% forever).
         $dbWorkEnabled = [bool]($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)
         $params.ContentDbProcessingEnabled = $dbWorkEnabled
-        # The campaign master always writes the hosted Dashboard.OutputPath. A worker writes it too
-        # only when it is a shared UNC location (reachable by every server) - so a deferred
-        # ConfirmReboot finishing after the master exits still updates the hosted copy. For a
-        # master-local OutputPath, workers render to the campaign folder (the master republishes the
-        # hosted copy on its next render).
+        # Destination selection for a configured Dashboard.OutputPath:
+        #  - Shared UNC OutputPath: any server (master or worker) publishes to it, so a deferred
+        #    ConfirmReboot finishing after the master exits still updates the hosted copy.
+        #  - Master-local (drive-letter) OutputPath: only the recorded master writes it; every other
+        #    run renders to the campaign folder so a worker never scribbles to its own local copy and
+        #    leaves the shared dashboard stale (or fails when the local folder is not writable). The
+        #    master is unknown until Default seeds master.txt, so before that - e.g. a ProductUpdate
+        #    run - local output also defaults to the campaign folder. ResetStatus passes
+        #    -InitialPublish to seed the hosted copy once up front.
         $outFile = $statusDashboardPath
-        if ($statusDashboardPath -ne $statusDashboardCampaignPath -and $params.ContainsKey('MasterServer')) {
-            $isMaster = ("$thisServer" -eq "$($params.MasterServer)")
-            if (-not $isMaster -and -not $statusDashboardOutputIsShared) { $outFile = $statusDashboardCampaignPath }
+        if ($statusDashboardPath -ne $statusDashboardCampaignPath -and -not $statusDashboardOutputIsShared) {
+            $isMaster = $params.ContainsKey('MasterServer') -and ("$thisServer" -eq "$($params.MasterServer)")
+            if (-not $isMaster -and -not $InitialPublish) { $outFile = $statusDashboardCampaignPath }
         }
         $params.OutputFile = $outFile
         if ($Completed) { $params.Completed = $true }
@@ -930,8 +934,10 @@ switch ($Action) {
                     Write-Output "Creating patching status store campaign: $statusCampaignPath"
                     New-Item -Path $statusCampaignPath -ItemType Directory -Force | Out-Null
                 }
-                # Generate the empty dashboard now so it is ready to open before patching.
-                Write-SPSDashboard
+                # Generate the empty dashboard now so it is ready to open before patching. The
+                # operator runs ResetStatus on the orchestrator, so publish the initial hosted copy
+                # explicitly (master.txt does not exist yet at this point).
+                Write-SPSDashboard -InitialPublish
                 if (-not [string]::IsNullOrEmpty($statusDashboardPath)) {
                     Write-Output "Live dashboard ready (open it in a browser): $statusDashboardPath"
                 }
