@@ -281,6 +281,7 @@ catch {
 }
 $statusDashboardPath = $null
 $statusDashboardCampaignPath = $null
+$statusDashboardOutputIsShared = $false
 if ($null -ne $statusCampaignPath) {
     # Dashboard file name is derived per farm (<App>-<Env>-<Farm>-dashboard.html) so several
     # farms (INT / Preprod / PROD) can share one IIS folder without colliding.
@@ -290,6 +291,11 @@ if ($null -ne $statusCampaignPath) {
     if (-not [string]::IsNullOrWhiteSpace($envCfg.Dashboard.OutputPath)) {
         if (Test-Path -Path $envCfg.Dashboard.OutputPath) {
             $dashboardOutputFolder = $envCfg.Dashboard.OutputPath
+            # A UNC OutputPath (\\server\share\...) is reachable by every farm server, so worker
+            # runs may safely publish the hosted copy to it (e.g. a deferred ConfirmReboot that
+            # finishes after the master Default run exits). A drive-letter path is treated as
+            # master-local: only the master writes it, workers render to the campaign folder.
+            $statusDashboardOutputIsShared = ([System.IO.Path]::IsPathRooted($dashboardOutputFolder) -and "$dashboardOutputFolder".StartsWith('\\'))
         }
         else {
             Write-Warning -Message "Dashboard.OutputPath '$($envCfg.Dashboard.OutputPath)' does not exist; writing the dashboard to the campaign folder instead."
@@ -375,12 +381,15 @@ function Write-SPSDashboard {
         # 100% forever).
         $dbWorkEnabled = [bool]($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)
         $params.ContentDbProcessingEnabled = $dbWorkEnabled
-        # Only the campaign master writes to a shared/IIS Dashboard.OutputPath. Worker runs render
-        # to the campaign folder so they cannot create divergent local copies that never reach the
-        # hosted dashboard; the master republishes the hosted copy on its next render.
+        # The campaign master always writes the hosted Dashboard.OutputPath. A worker writes it too
+        # only when it is a shared UNC location (reachable by every server) - so a deferred
+        # ConfirmReboot finishing after the master exits still updates the hosted copy. For a
+        # master-local OutputPath, workers render to the campaign folder (the master republishes the
+        # hosted copy on its next render).
         $outFile = $statusDashboardPath
         if ($statusDashboardPath -ne $statusDashboardCampaignPath -and $params.ContainsKey('MasterServer')) {
-            if ("$thisServer" -ne "$($params.MasterServer)") { $outFile = $statusDashboardCampaignPath }
+            $isMaster = ("$thisServer" -eq "$($params.MasterServer)")
+            if (-not $isMaster -and -not $statusDashboardOutputIsShared) { $outFile = $statusDashboardCampaignPath }
         }
         $params.OutputFile = $outFile
         if ($Completed) { $params.Completed = $true }

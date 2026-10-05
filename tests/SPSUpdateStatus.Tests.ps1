@@ -133,6 +133,26 @@ Describe 'Set-SPSUpdateStatus -SeedIfAbsent (baseline enrichment)' {
         $r.Role | Should -Be 'Application'                 # farm metadata enriched
         $r.PatchStatus | Should -Be 'No Action Required'   # farm metadata enriched
     }
+
+    It 'skips the write (no lost update) when the scope lock cannot be acquired' {
+        $camp = Join-Path -Path $script:root -ChildPath 'campaign-locked'
+        New-Item -Path $camp -ItemType Directory -Force | Out-Null
+        # Worker records Done.
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Build '16.0.20326.20136' -Confirm:$false | Out-Null
+        # Simulate a fresh, held lock by creating the sibling .lock file and keeping the handle open.
+        $lockPath = Join-Path -Path $camp -ChildPath 'APP1__ProductUpdate.json.lock'
+        $held = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+            # A baseline enrichment cannot take the lock and must skip rather than clobber.
+            Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Pending' -Role 'Application' -SeedIfAbsent -Confirm:$false -WarningAction SilentlyContinue | Out-Null
+            $r = Get-SPSUpdateStatus -CampaignPath $camp | Where-Object { $_.Server -eq 'APP1' }
+            $r.State | Should -Be 'Done'   # the Done state was not overwritten
+        }
+        finally {
+            $held.Close(); $held.Dispose()
+            Remove-Item -Path $lockPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Describe 'Get-SPSUpdateStatus resilience' {

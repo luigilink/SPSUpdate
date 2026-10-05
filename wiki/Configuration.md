@@ -235,12 +235,13 @@ Dashboard = @{
 |---|---|---|
 | `Dashboard.OutputPath` | An **existing** folder (for example an IIS site folder) where the dashboard HTML is written so it can be served over HTTP. SPSUpdate does not create the IIS site — create it once (like the SPSConfigKit pull-server dashboard) and point `OutputPath` at its folder. | `''` (campaign folder) |
 
-Only the **campaign master** (the server running the orchestrating `Default` run) writes to
-`OutputPath`; worker runs (distributed `ProductUpdate`, `ConfirmReboot`) always render to the
-campaign folder, and the master republishes the hosted copy on its next render. For a distributed
-farm where you want the hosted dashboard to update in near real time, point `OutputPath` at a
-**shared** location reachable by the master (for example a UNC path to the IIS folder) rather than
-a path that only exists locally on each server.
+Only the **campaign master** (the server running the orchestrating `Default` run) writes to a
+**master-local** `OutputPath` (a drive-letter path); worker runs then render to the campaign folder
+and the master republishes the hosted copy on its next render. If you point `OutputPath` at a
+**shared UNC path** (`\\server\share\...`) reachable by every farm server, worker runs publish to it
+too — so a deferred `ConfirmReboot` that finishes after the master run exits still updates the
+hosted dashboard. For a distributed farm where you want the hosted dashboard to update in near real
+time, prefer a shared UNC `OutputPath` over a path that only exists locally on each server.
 
 The dashboard file name is derived per farm — `<App>-<Env>-<Farm>-dashboard.html` — so several
 farms (INT / Preprod / PROD) can share a single IIS folder without colliding. At the start of a

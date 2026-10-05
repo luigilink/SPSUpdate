@@ -165,6 +165,7 @@
     $lockStream = $null
     $lockAcquired = $false
     $lockAttempts = 0
+    $lockStaleSeconds = 30
     while (-not $lockAcquired -and $lockAttempts -lt 40) {
         $lockAttempts++
         try {
@@ -172,8 +173,25 @@
             $lockAcquired = $true
         }
         catch {
+            # Steal a stale lock left by a crashed writer (older than the stale threshold) so a dead
+            # process cannot block the store indefinitely.
+            try {
+                $lockInfo = Get-Item -Path $lockPath -ErrorAction Stop
+                if (((Get-Date) - $lockInfo.LastWriteTime).TotalSeconds -gt $lockStaleSeconds) {
+                    Remove-Item -Path $lockPath -Force -WhatIf:$false -Confirm:$false -ErrorAction SilentlyContinue
+                }
+            }
+            catch { Write-Verbose -Message "Set-SPSUpdateStatus: could not inspect the lock file: $($_.Exception.Message)" }
             Start-Sleep -Milliseconds (40 + (Get-Random -Maximum 60))
         }
+    }
+
+    # If the lock could not be taken, skip this best-effort status write rather than risk a lost
+    # update (reading a stale record under a still-held lock and overwriting a newer worker state).
+    # Atomic replacement prevents torn JSON, not lost updates - so when we cannot serialise we abort.
+    if (-not $lockAcquired) {
+        Write-Warning -Message "Set-SPSUpdateStatus: could not acquire the lock for '$filePath' after $lockAttempts attempts; skipping this status write to avoid a lost update."
+        return $filePath
     }
 
     try {
@@ -308,7 +326,9 @@
             try { $lockStream.Close(); $lockStream.Dispose() } catch { Write-Verbose -Message "Set-SPSUpdateStatus: lock handle cleanup failed: $($_.Exception.Message)" }
         }
         if ($lockAcquired) {
-            Remove-Item -Path $lockPath -Force -ErrorAction SilentlyContinue
+            # -WhatIf:$false so a -WhatIf invocation (which still physically created the lock via
+            # File.Open) does not leave an orphaned .lock file that would starve later real writes.
+            Remove-Item -Path $lockPath -Force -WhatIf:$false -Confirm:$false -ErrorAction SilentlyContinue
         }
     }
 }
