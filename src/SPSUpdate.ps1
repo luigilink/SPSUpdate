@@ -291,11 +291,14 @@ if ($null -ne $statusCampaignPath) {
     if (-not [string]::IsNullOrWhiteSpace($envCfg.Dashboard.OutputPath)) {
         if (Test-Path -Path $envCfg.Dashboard.OutputPath) {
             $dashboardOutputFolder = $envCfg.Dashboard.OutputPath
-            # A UNC OutputPath (\\server\share\...) is reachable by every farm server, so worker
-            # runs may safely publish the hosted copy to it (e.g. a deferred ConfirmReboot that
-            # finishes after the master Default run exits). A drive-letter path is treated as
-            # master-local: only the master writes it, workers render to the campaign folder.
-            $statusDashboardOutputIsShared = ([System.IO.Path]::IsPathRooted($dashboardOutputFolder) -and "$dashboardOutputFolder".StartsWith('\\'))
+            # A UNC OutputPath (\\server\share\... or //server/share/...) is reachable by every
+            # farm server, so worker runs may safely publish the hosted copy to it (e.g. a deferred
+            # ConfirmReboot that finishes after the master Default run exits). A drive-letter path is
+            # treated as master-local: only the master writes it, workers render to the campaign
+            # folder. (UNC is identified by the leading double separator; IsPathRooted is avoided as
+            # it is platform-dependent for backslash paths.)
+            $outTrim = "$dashboardOutputFolder"
+            $statusDashboardOutputIsShared = ($outTrim.StartsWith('\\') -or $outTrim.StartsWith('//'))
         }
         else {
             Write-Warning -Message "Dashboard.OutputPath '$($envCfg.Dashboard.OutputPath)' does not exist; writing the dashboard to the campaign folder instead."
@@ -934,9 +937,21 @@ switch ($Action) {
                     Write-Output "Creating patching status store campaign: $statusCampaignPath"
                     New-Item -Path $statusCampaignPath -ItemType Directory -Force | Out-Null
                 }
+                # Persist the orchestrator identity now (ResetStatus is run on the master/orchestrator)
+                # so later runs on this server - including ProductUpdate before Default seeds it - are
+                # recognised as the master and can update a drive-letter Dashboard.OutputPath instead
+                # of being redirected to the campaign folder. Written after the campaign cleanup above
+                # (which clears every file) and before the initial publish.
+                try {
+                    $resetMasterMarker = Join-Path -Path $statusCampaignPath -ChildPath 'master.txt'
+                    Set-Content -Path $resetMasterMarker -Value $thisServer -Encoding UTF8 -Force -ErrorAction Stop
+                }
+                catch {
+                    Write-Warning -Message "Could not persist the campaign master marker during ResetStatus: $($_.Exception.Message)"
+                }
                 # Generate the empty dashboard now so it is ready to open before patching. The
                 # operator runs ResetStatus on the orchestrator, so publish the initial hosted copy
-                # explicitly (master.txt does not exist yet at this point).
+                # explicitly.
                 Write-SPSDashboard -InitialPublish
                 if (-not [string]::IsNullOrEmpty($statusDashboardPath)) {
                     Write-Output "Live dashboard ready (open it in a browser): $statusDashboardPath"
