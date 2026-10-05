@@ -357,15 +357,12 @@ function Write-SPSDashboard {
             catch { Write-Verbose -Message "Could not read the campaign master marker: $($_.Exception.Message)" }
         }
         # Content-database inventory: the local $spsUpdateDBsPath is relative to each server's
-        # script checkout, but the dashboard (and status store) is shared across the farm. The
-        # master publishes its inventory as a campaign snapshot ('inventory.json' in the shared
-        # store) so worker runs (ProductUpdate / ConfirmReboot) that regenerate the dashboard still
-        # render the Content Databases card and count every database, even without a local copy.
+        # script checkout, but the dashboard (and status store) is shared across the farm. Every
+        # renderer READS a campaign snapshot ('inventory.json') published once by the orchestrating
+        # master (see Publish-SPSInventorySnapshot); worker runs never replace it, so a worker's
+        # stale local copy cannot overwrite the master's authoritative inventory. Fall back to the
+        # local copy only for read-only rendering when no shared snapshot exists yet.
         $sharedInventory = Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json'
-        if (Test-Path -Path $spsUpdateDBsPath) {
-            try { Copy-Item -Path $spsUpdateDBsPath -Destination $sharedInventory -Force -ErrorAction Stop }
-            catch { Write-Verbose -Message "Could not publish the campaign inventory snapshot: $($_.Exception.Message)" }
-        }
         if (Test-Path -Path $sharedInventory) { $params.ContentDbInventoryFile = $sharedInventory }
         elseif (Test-Path -Path $spsUpdateDBsPath) { $params.ContentDbInventoryFile = $spsUpdateDBsPath }
         if ($Completed) { $params.Completed = $true }
@@ -373,6 +370,24 @@ function Write-SPSDashboard {
     }
     catch {
         Write-Warning -Message "Failed to generate patching dashboard: $($_.Exception.Message)"
+    }
+}
+
+# Local helper: publish the master's ContentDatabase inventory as the single authoritative
+# campaign snapshot (inventory.json) in the shared status store. Only the orchestrating master
+# (Default run) calls this, so a worker's possibly stale local ContentDBs.json can never overwrite
+# it. Safe no-op when there is no local inventory or no campaign path.
+function Publish-SPSInventorySnapshot {
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
+    if (-not (Test-Path -Path $spsUpdateDBsPath)) { return }
+    try {
+        if (-not (Test-Path -Path $statusCampaignPath)) {
+            New-Item -Path $statusCampaignPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+        Copy-Item -Path $spsUpdateDBsPath -Destination (Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json') -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Verbose -Message "Could not publish the campaign inventory snapshot: $($_.Exception.Message)"
     }
 }
 
@@ -431,6 +446,8 @@ function Initialize-SPSDashboardBaseline {
                 }
             }
         }
+        # Publish the master's inventory as the authoritative campaign snapshot for all renderers.
+        Publish-SPSInventorySnapshot
         Write-SPSDashboard
     }
     catch {
