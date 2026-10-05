@@ -134,6 +134,21 @@ Describe 'Export-SPSUpdateProgressReport (pre-patch anomaly)' {
         $h = Get-Content -Path $out -Raw
         $h | Should -Match 'database\(s\) with a pending upgrade'
     }
+
+    It 'does not raise a database anomaly for an Unknown (unresolved) upgrade status' {
+        $camp = New-Campaign -Name 'anomdb-unknown'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Pending' -PatchStatus 'No Action Required' -Confirm:$false | Out-Null
+        $invPath = Join-Path $camp 'inv.json'
+        [PSCustomObject]@{
+            SPContentDatabase1 = @(
+                [PSCustomObject]@{ Name = 'WSS_Content_New'; WebAppUrl = 'https://portal'; Server = 'SQL1'; SizeInMB = 100; UpgradeStatus = 'Unknown' }
+            )
+        } | ConvertTo-Json -Depth 6 | Set-Content -Path $invPath -Encoding UTF8
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $invPath
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Not -Match 'Pre-patch inconsistency detected'
+        $h | Should -Match 'Unknown'
+    }
 }
 
 Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {

@@ -384,7 +384,47 @@ function Publish-SPSInventorySnapshot {
         if (-not (Test-Path -Path $statusCampaignPath)) {
             New-Item -Path $statusCampaignPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
         }
-        Copy-Item -Path $spsUpdateDBsPath -Destination (Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json') -Force -ErrorAction Stop
+        $snapshotPath = Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json'
+        try {
+            $inv = Get-Content -Path $spsUpdateDBsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+
+            # The ContentDatabase inventory is cached in the Config folder and reused across
+            # campaigns, so its baked-in UpgradeStatus can be stale (a flag from a previous campaign)
+            # or absent (older inventory generated before the field existed). Refresh the upgrade
+            # baseline from live SharePoint while preserving the saved database and sequence layout;
+            # databases that cannot be resolved live (for example not yet mounted) are marked
+            # 'Unknown' rather than silently 'healthy'.
+            $liveUpgrade = @{}
+            try {
+                foreach ($cdb in @(Get-SPContentDatabase -ErrorAction Stop)) {
+                    if ($null -ne $cdb -and -not [string]::IsNullOrEmpty("$($cdb.Name)")) {
+                        $liveUpgrade["$($cdb.Name)".ToLowerInvariant()] = if ($cdb.NeedsUpgrade) { 'Upgrade available' } else { 'No update pending' }
+                    }
+                }
+            }
+            catch {
+                Write-Verbose -Message "Could not read live content-database upgrade status: $($_.Exception.Message)"
+            }
+            if ($liveUpgrade.Count -gt 0) {
+                foreach ($prop in 'SPContentDatabase1', 'SPContentDatabase2', 'SPContentDatabase3', 'SPContentDatabase4') {
+                    if ($inv.PSObject.Properties.Name -notcontains $prop) { continue }
+                    foreach ($db in @($inv.$prop)) {
+                        if ($null -eq $db -or [string]::IsNullOrEmpty("$($db.Name)")) { continue }
+                        $key = "$($db.Name)".ToLowerInvariant()
+                        $val = if ($liveUpgrade.ContainsKey($key)) { $liveUpgrade[$key] } else { 'Unknown' }
+                        if ($db.PSObject.Properties.Name -contains 'UpgradeStatus') { $db.UpgradeStatus = $val }
+                        else { $db | Add-Member -NotePropertyName 'UpgradeStatus' -NotePropertyValue $val }
+                    }
+                }
+            }
+            $inv | ConvertTo-Json -Depth 6 | Set-Content -Path $snapshotPath -Encoding UTF8 -ErrorAction Stop
+        }
+        catch {
+            # If the inventory cannot be parsed/refreshed, still publish it verbatim so renderers
+            # at least have the database/sequence layout.
+            Write-Verbose -Message "Publishing the inventory snapshot without an upgrade refresh: $($_.Exception.Message)"
+            Copy-Item -Path $spsUpdateDBsPath -Destination $snapshotPath -Force -ErrorAction Stop
+        }
     }
     catch {
         Write-Verbose -Message "Could not publish the campaign inventory snapshot: $($_.Exception.Message)"

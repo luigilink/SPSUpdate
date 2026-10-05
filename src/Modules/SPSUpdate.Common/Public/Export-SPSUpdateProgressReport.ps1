@@ -303,7 +303,9 @@
             foreach ($db in @($inventory.$prop)) {
                 if ($null -eq $db) { continue }
                 $us = if ($db.PSObject.Properties.Name -contains 'UpgradeStatus') { "$($db.UpgradeStatus)" } else { '' }
-                if (-not [string]::IsNullOrWhiteSpace($us) -and $us -ne 'No update pending') { $dbAnom++ }
+                # Count only a confirmed pending upgrade. 'Unknown' (a database that could not be
+                # resolved live, e.g. not yet mounted) is neither healthy nor a confirmed anomaly.
+                if (-not [string]::IsNullOrWhiteSpace($us) -and $us -ne 'No update pending' -and $us -ne 'Unknown') { $dbAnom++ }
             }
         }
     }
