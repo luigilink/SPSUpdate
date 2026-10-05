@@ -46,6 +46,13 @@
         Initialize-SPSContentDbJsonFile). When provided, the Content Databases card is populated
         from it, joined with the per-database processing state in the status store.
 
+        .PARAMETER ContentDbProcessingEnabled
+        Whether the campaign actually mounts/upgrades content databases. When $false (both
+        MountContentDatabase and UpgradeContentDatabase disabled), the inventory is still displayed
+        but its not-yet-processed databases are shown as Skipped and excluded from the completion
+        roll-up, so a campaign that legitimately skips database work can still reach 100%. Default
+        $true.
+
         .PARAMETER RefreshSeconds
         Meta-refresh interval (seconds). 0 disables auto-refresh. Default 15.
 
@@ -99,6 +106,10 @@
         [Parameter()]
         [System.String]
         $ContentDbInventoryFile,
+
+        [Parameter()]
+        [System.Boolean]
+        $ContentDbProcessingEnabled = $true,
 
         [Parameter()]
         [System.Int32]
@@ -171,12 +182,20 @@
     if (-not $binRows) { $binRows = '<tr><td colspan="5" class="muted-txt">No server status yet.</td></tr>' }
 
     # ---- Card 2: SharePoint Configuration Wizard ----------------------------------
+    # The Wizard row's build is seeded from the farm build at baseline, which can still be the
+    # previous CU until PSConfig runs. Prefer the same server's ProductUpdate-recorded build (the
+    # actually installed CU) when available, so both cards agree on the installed version.
+    $puBuildByServer = @{}
+    foreach ($b in $binaries) {
+        if (-not [string]::IsNullOrWhiteSpace("$($b.Build)")) { $puBuildByServer["$($b.Server)"] = "$($b.Build)" }
+    }
     $wizRows = foreach ($w in $wizard) {
+        $wizBuild = if ($puBuildByServer.ContainsKey("$($w.Server)")) { $puBuildByServer["$($w.Server)"] } else { $w.Build }
         '<tr>' +
         "<td>$(& $serverCell $w.Server $w.Role)</td>" +
         "<td>$(& $pill $w.State)</td>" +
         "<td>$(& $orDash $w.PatchStatus)</td>" +
-        "<td class=`"mono`">$(& $orDash $w.Build)</td>" +
+        "<td class=`"mono`">$(& $orDash $wizBuild)</td>" +
         "<td class=`"mono`">$(& $fmtDate $w.CompletedAt)</td>" +
         "<td>$(& $orDash $w.Detail)</td>" +
         '</tr>'
@@ -218,7 +237,11 @@
                 }
                 $upgradeStatus = if ($db.PSObject.Properties.Name -contains 'UpgradeStatus' -and "$($db.UpgradeStatus)" -ne '') { "$($db.UpgradeStatus)" } else { '' }
                 $state = $dbStateByName["$($db.Name)".ToLowerInvariant()]
-                if ([string]::IsNullOrEmpty($state)) { $state = 'Pending' }
+                if ([string]::IsNullOrEmpty($state)) {
+                    # No processing record yet: Pending when database work is planned, otherwise
+                    # Skipped (this campaign does not mount/upgrade content databases).
+                    $state = if ($ContentDbProcessingEnabled) { 'Pending' } else { 'Skipped' }
+                }
                 if ($state -eq 'Running') { $dbUpgrading++ }
                 $dbRows += '<tr>' +
                 "<td class=`"mono`">$(& $enc $db.Name)</td>" +
@@ -271,10 +294,14 @@
             $units += "$($sc.State)"
         }
     }
-    # Content databases from the inventory that have no processing item yet are still pending work:
-    # count them so completion reflects the whole farm (and cannot reach 100% with rows pending).
-    foreach ($nm in $dbInvNames.Keys) {
-        if (-not $recordedDbNames.ContainsKey($nm)) { $units += 'Pending' }
+    # Content databases from the inventory that have no processing item yet: when database work is
+    # planned they are still pending work (counted so completion reflects the whole farm and cannot
+    # reach 100% with rows pending). When database work is disabled for this campaign they are not
+    # counted at all, so a campaign that legitimately skips database work can still reach 100%.
+    if ($ContentDbProcessingEnabled) {
+        foreach ($nm in $dbInvNames.Keys) {
+            if (-not $recordedDbNames.ContainsKey($nm)) { $units += 'Pending' }
+        }
     }
     $total = $units.Count
     $countDone = @($units | Where-Object { $_ -eq 'Done' -or $_ -eq 'Skipped' }).Count
@@ -282,10 +309,15 @@
     $countFailed = @($units | Where-Object { $_ -eq 'Failed' }).Count
     $countPending = $total - $countDone - $countRunning - $countFailed
     if ($countPending -lt 0) { $countPending = 0 }
+    # Reserve 100% (and the green colour) for a campaign where every unit is Done/Skipped. Otherwise
+    # cap the displayed percentage at 99 so rounding (e.g. 299/300 = 99.67 -> 100) never shows a
+    # green 100% while any unit is still Pending/Running.
+    $allComplete = ($total -gt 0 -and $countDone -eq $total)
     $pct = if ($total -gt 0) { [int]([math]::Round($countDone / $total * 100, 0)) } else { 0 }
+    if ($pct -ge 100 -and -not $allComplete) { $pct = 99 }
     $donePctSeg = if ($total -gt 0) { [math]::Round($countDone / $total * 100, 2) } else { 0 }
     $runPctSeg = if ($total -gt 0) { [math]::Round($countRunning / $total * 100, 2) } else { 0 }
-    $pctColor = if ($countFailed -gt 0) { 'var(--err)' } elseif ($pct -eq 100) { 'var(--ok)' } else { 'var(--primary)' }
+    $pctColor = if ($countFailed -gt 0) { 'var(--err)' } elseif ($allComplete) { 'var(--ok)' } else { 'var(--primary)' }
 
     $serverCount = @(@($binaries.Server) + @($wizard.Server) | Select-Object -Unique).Count
     $binDone = @($binaries | Where-Object { $_.State -eq 'Done' -or $_.State -eq 'Skipped' }).Count
@@ -366,20 +398,20 @@
     '<div class="card phase-card"><div class="phase-head">' +
     '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>' +
     "<h2>Binaries Installation</h2><span class=`"count`">$(@($binaries).Count) servers</span></div>" +
-    '<table class="grid"><thead><tr><th>Server</th><th>Status</th><th>Patch Status</th><th>Build Version</th><th>Completed Date</th></tr></thead><tbody>' +
-    ($binRows -join '') + '</tbody></table></div>' +
+    '<div class="table-wrap"><table class="grid"><thead><tr><th>Server</th><th>Status</th><th>Patch Status</th><th>Build Version</th><th>Completed Date</th></tr></thead><tbody>' +
+    ($binRows -join '') + '</tbody></table></div></div>' +
     # Card 2
     '<div class="card phase-card"><div class="phase-head">' +
     '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>' +
     "<h2>SharePoint Configuration Wizard</h2><span class=`"count`">$(@($wizard).Count) servers</span></div>" +
-    '<table class="grid"><thead><tr><th>Server</th><th>Status</th><th>Patch Status</th><th>Build Version</th><th>Completed Date</th><th>Detail</th></tr></thead><tbody>' +
-    ($wizRows -join '') + '</tbody></table></div>' +
+    '<div class="table-wrap"><table class="grid"><thead><tr><th>Server</th><th>Status</th><th>Patch Status</th><th>Build Version</th><th>Completed Date</th><th>Detail</th></tr></thead><tbody>' +
+    ($wizRows -join '') + '</tbody></table></div></div>' +
     # Card 3
     '<div class="card phase-card"><div class="phase-head">' +
     '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>' +
     "<h2>Content Databases</h2><span class=`"count`">$dbCount databases$(if ($dbUpgrading -gt 0) { " &middot; $dbUpgrading upgrading" })</span></div>" +
-    '<table class="grid"><thead><tr><th>DB Name</th><th>Web Application</th><th>SQL Instance</th><th class="num">Size (MB)</th><th>Sequence</th><th>Upgrade Status</th><th>State</th></tr></thead><tbody>' +
-    ($dbRows -join '') + '</tbody></table></div>' +
+    '<div class="table-wrap"><table class="grid"><thead><tr><th>DB Name</th><th>Web Application</th><th>SQL Instance</th><th class="num">Size (MB)</th><th>Sequence</th><th>Upgrade Status</th><th>State</th></tr></thead><tbody>' +
+    ($dbRows -join '') + '</tbody></table></div></div>' +
     "<div class=`"footer`">SPSUpdate $encVersion &middot; generated $generated &middot; $liveNote &middot; <a href=`"https://spjc.fr`">spjc.fr</a></div>" +
     '</div></body></html>'
 

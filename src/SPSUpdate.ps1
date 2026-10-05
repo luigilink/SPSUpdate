@@ -280,10 +280,12 @@ catch {
     Write-Warning -Message "Could not resolve the status store campaign path: $($_.Exception.Message)"
 }
 $statusDashboardPath = $null
+$statusDashboardCampaignPath = $null
 if ($null -ne $statusCampaignPath) {
     # Dashboard file name is derived per farm (<App>-<Env>-<Farm>-dashboard.html) so several
     # farms (INT / Preprod / PROD) can share one IIS folder without colliding.
     $spsUpdateDashboardFile = "$($Application)-$($Environment)-$($spFarmName)-dashboard.html"
+    $statusDashboardCampaignPath = Join-Path -Path $statusCampaignPath -ChildPath $spsUpdateDashboardFile
     $dashboardOutputFolder = $statusCampaignPath
     if (-not [string]::IsNullOrWhiteSpace($envCfg.Dashboard.OutputPath)) {
         if (Test-Path -Path $envCfg.Dashboard.OutputPath) {
@@ -365,6 +367,20 @@ function Write-SPSDashboard {
         $sharedInventory = Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json'
         if (Test-Path -Path $sharedInventory) { $params.ContentDbInventoryFile = $sharedInventory }
         elseif (Test-Path -Path $spsUpdateDBsPath) { $params.ContentDbInventoryFile = $spsUpdateDBsPath }
+        # Tell the renderer whether content-database processing is actually planned. When both
+        # MountContentDatabase and UpgradeContentDatabase are disabled, the inventory is still shown
+        # but its databases must not be counted as pending work (they would keep the campaign below
+        # 100% forever).
+        $dbWorkEnabled = [bool]($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)
+        $params.ContentDbProcessingEnabled = $dbWorkEnabled
+        # Only the campaign master writes to a shared/IIS Dashboard.OutputPath. Worker runs render
+        # to the campaign folder so they cannot create divergent local copies that never reach the
+        # hosted dashboard; the master republishes the hosted copy on its next render.
+        $outFile = $statusDashboardPath
+        if ($statusDashboardPath -ne $statusDashboardCampaignPath -and $params.ContainsKey('MasterServer')) {
+            if ("$thisServer" -ne "$($params.MasterServer)") { $outFile = $statusDashboardCampaignPath }
+        }
+        $params.OutputFile = $outFile
         if ($Completed) { $params.Completed = $true }
         $null = Export-SPSUpdateProgressReport @params
     }
@@ -405,16 +421,17 @@ function Publish-SPSInventorySnapshot {
             catch {
                 Write-Verbose -Message "Could not read live content-database upgrade status: $($_.Exception.Message)"
             }
-            if ($liveUpgrade.Count -gt 0) {
-                foreach ($prop in 'SPContentDatabase1', 'SPContentDatabase2', 'SPContentDatabase3', 'SPContentDatabase4') {
-                    if ($inv.PSObject.Properties.Name -notcontains $prop) { continue }
-                    foreach ($db in @($inv.$prop)) {
-                        if ($null -eq $db -or [string]::IsNullOrEmpty("$($db.Name)")) { continue }
-                        $key = "$($db.Name)".ToLowerInvariant()
-                        $val = if ($liveUpgrade.ContainsKey($key)) { $liveUpgrade[$key] } else { 'Unknown' }
-                        if ($db.PSObject.Properties.Name -contains 'UpgradeStatus') { $db.UpgradeStatus = $val }
-                        else { $db | Add-Member -NotePropertyName 'UpgradeStatus' -NotePropertyValue $val }
-                    }
+            # Always walk the inventory so a stale baseline is never kept: every database gets its
+            # live value, and any entry not resolved live (empty lookup, or not yet mounted) is
+            # marked 'Unknown' rather than left at a possibly stale 'healthy' value.
+            foreach ($prop in 'SPContentDatabase1', 'SPContentDatabase2', 'SPContentDatabase3', 'SPContentDatabase4') {
+                if ($inv.PSObject.Properties.Name -notcontains $prop) { continue }
+                foreach ($db in @($inv.$prop)) {
+                    if ($null -eq $db -or [string]::IsNullOrEmpty("$($db.Name)")) { continue }
+                    $key = "$($db.Name)".ToLowerInvariant()
+                    $val = if ($liveUpgrade.ContainsKey($key)) { $liveUpgrade[$key] } else { 'Unknown' }
+                    if ($db.PSObject.Properties.Name -contains 'UpgradeStatus') { $db.UpgradeStatus = $val }
+                    else { $db | Add-Member -NotePropertyName 'UpgradeStatus' -NotePropertyValue $val }
                 }
             }
             $inv | ConvertTo-Json -Depth 6 | Set-Content -Path $snapshotPath -Encoding UTF8 -ErrorAction Stop
@@ -872,10 +889,14 @@ switch ($Action) {
                 if (Test-Path -Path $statusCampaignPath) {
                     Write-Output "Resetting patching status store campaign: $statusCampaignPath"
                     # Archive the previous dashboard(s) before clearing, so campaign history is kept.
-                    # Includes the legacy '_dashboard.html' name used before the per-farm filename,
-                    # so an upgrade from an older version still archives rather than deletes it.
+                    # Covers the IIS/OutputPath copy, the campaign-folder per-farm copy (in case the
+                    # OutputPath changed between campaigns) and the legacy '_dashboard.html' name, so
+                    # none is deleted without being archived first.
                     $dashboardsToArchive = @()
                     if (-not [string]::IsNullOrEmpty($statusDashboardPath)) { $dashboardsToArchive += $statusDashboardPath }
+                    if (-not [string]::IsNullOrEmpty($statusDashboardCampaignPath) -and ($dashboardsToArchive -notcontains $statusDashboardCampaignPath)) {
+                        $dashboardsToArchive += $statusDashboardCampaignPath
+                    }
                     $legacyDashboard = Join-Path -Path $statusCampaignPath -ChildPath '_dashboard.html'
                     if ($dashboardsToArchive -notcontains $legacyDashboard) { $dashboardsToArchive += $legacyDashboard }
                     $archiveFailed = $false
@@ -887,7 +908,9 @@ switch ($Action) {
                                 New-Item -Path $historyFolder -ItemType Directory -Force | Out-Null
                             }
                             $dashLeaf = [System.IO.Path]::GetFileNameWithoutExtension($dashToArchive)
-                            $archiveName = '{0}_{1}.html' -f $dashLeaf, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss')
+                            # Unique suffix so reports with the same leaf name from two locations (IIS
+                            # folder and campaign folder) cannot overwrite one another in history.
+                            $archiveName = '{0}_{1}_{2}.html' -f $dashLeaf, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'), ([guid]::NewGuid().ToString('N').Substring(0, 6))
                             Move-Item -Path $dashToArchive -Destination (Join-Path -Path $historyFolder -ChildPath $archiveName) -Force -ErrorAction Stop
                             Write-Output "Archived the previous dashboard to history\$archiveName"
                         }

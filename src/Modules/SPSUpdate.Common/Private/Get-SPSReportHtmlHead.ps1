@@ -79,6 +79,8 @@ header.page .sub{color:var(--muted-fg);margin:8px 0 0;font-size:13.5px}
 .phase-head h2{margin:0;font-size:15.5px;font-weight:650;letter-spacing:-.01em;border:none;padding:0;color:var(--foreground)}
 .phase-head .count{margin-left:auto;font-size:12.5px;color:var(--muted-fg)}
 table.grid{width:100%;border-collapse:collapse}
+.table-wrap{overflow-x:auto}
+.table-wrap table.grid{min-width:640px}
 table.grid thead th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-fg);padding:12px 20px;border-bottom:1px solid var(--border);background:transparent}
 table.grid thead th.num,table.grid tbody td.num{text-align:right;font-variant-numeric:tabular-nums}
 table.grid tbody td{padding:12px 20px;border-bottom:1px solid var(--border);font-size:13.5px;vertical-align:top}
@@ -87,7 +89,7 @@ table.grid tbody tr:hover{background:var(--hover)}
 td .srv{font-weight:600}
 td .sub2{color:var(--muted-fg);font-size:12px}
 .master-tag{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 40%,transparent);border-radius:5px;padding:1px 6px;margin-left:8px;vertical-align:middle}
-.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;color:var(--pill);background:color-mix(in srgb,var(--pill) 16%,transparent);border:1px solid color-mix(in srgb,var(--pill) 35%,transparent)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;color:var(--foreground);background:color-mix(in srgb,var(--pill) 16%,transparent);border:1px solid color-mix(in srgb,var(--pill) 35%,transparent)}
 .pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--pill)}
 .pill.done{--pill:var(--ok)}.pill.running{--pill:var(--info)}.pill.failed{--pill:var(--err)}
 .pill.pending{--pill:var(--muted)}.pill.skipped{--pill:var(--muted)}.pill.reboot{--pill:var(--warn)}

@@ -190,6 +190,48 @@ Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {
         $h | Should -Not -Match '>100%<'
         $h | Should -Match 'Running <span class="n">1</span>'
     }
+
+    It 'caps the displayed percentage at 99 until every unit is terminal' {
+        $camp = New-Campaign -Name 'rollup-cap'
+        1..9 | ForEach-Object {
+            Set-SPSUpdateStatus -CampaignPath $camp -Scope "ProductUpdate" -Phase 'ProductUpdate' -Server "SRV$_" -State 'Done' -Confirm:$false | Out-Null
+        }
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'SRV10' -State 'Running' -Confirm:$false | Out-Null
+        # 9 of 10 done (90%) is below 100 anyway; add enough done units to round to 100 with one left.
+        10..299 | ForEach-Object {
+            Set-SPSUpdateStatus -CampaignPath $camp -Scope "ProductUpdate" -Phase 'ProductUpdate' -Server "PAD$_" -State 'Done' -Confirm:$false | Out-Null
+        }
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Not -Match '>100%<'
+        $h | Should -Not -Match 'color:var\(--ok\)">100%'
+    }
+
+    It 'excludes inventory databases from completion when database work is disabled' {
+        $camp = New-Campaign -Name 'rollup-nodbwork'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        $inv = New-Inventory -Path (Join-Path $camp 'inv.json')
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $inv -ContentDbProcessingEnabled:$false
+        $h = Get-Content -Path $out -Raw
+        # The single server is done and databases are not counted, so the campaign is complete.
+        $h | Should -Match 'color:var\(--ok\)">100%'
+        # Databases are still displayed, shown as Skipped rather than Pending.
+        $h | Should -Match 'WSS_Content_Portal'
+        $h | Should -Match 'pill skipped'
+    }
+}
+
+Describe 'Export-SPSUpdateProgressReport (card consistency)' {
+    It 'shows the ProductUpdate build on the Wizard card when the farm baseline lags' {
+        $camp = New-Campaign -Name 'wizbuild'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Build '16.0.20326.20136' -PatchStatus 'No Action Required' -Confirm:$false | Out-Null
+        # Wizard row seeded with the older farm build.
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Wizard' -Phase 'Wizard' -Server 'APP1' -State 'Done' -Build '16.0.17928.20286' -PatchStatus 'No Action Required' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        # The Wizard card must show the installed ProductUpdate build, not the stale baseline build.
+        ([regex]::Matches($h, '16\.0\.20326\.20136')).Count | Should -BeGreaterThan 1
+    }
 }
 
 Describe 'Export-SPSUpdateProgressReport (encoding)' {
