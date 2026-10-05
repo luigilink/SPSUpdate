@@ -78,6 +78,36 @@ Describe 'Set-SPSUpdateStatus / Get-SPSUpdateStatus round-trip' {
     }
 }
 
+Describe 'Set-SPSUpdateStatus completion timestamp' {
+    BeforeAll {
+        $script:campCompleted = Join-Path -Path $script:root -ChildPath 'campaign-completed'
+    }
+
+    It 'stamps CompletedAt when a scope first reaches a terminal success state' {
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        $r = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'APP1' }
+        $r.CompletedAt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'clears CompletedAt when the scope is re-attempted and re-stamps it on the next terminal state' {
+        # Skipped (out of install window) stamps a completion time.
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Skipped' -Confirm:$false | Out-Null
+        $skipped = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'WFE1' }
+        $firstStamp = $skipped.CompletedAt
+        $firstStamp | Should -Not -BeNullOrEmpty
+
+        # A later in-window attempt goes Running: the stale completion date must be cleared.
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Running' -Confirm:$false | Out-Null
+        $running = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'WFE1' }
+        $running.CompletedAt | Should -BeNullOrEmpty
+
+        # The eventual Done stamps a fresh completion time.
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Done' -Confirm:$false | Out-Null
+        $done = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'WFE1' }
+        $done.CompletedAt | Should -Not -BeNullOrEmpty
+    }
+}
+
 Describe 'Get-SPSUpdateStatus resilience' {
     It 'returns an empty array for a missing campaign folder' {
         $missing = Join-Path -Path $script:root -ChildPath 'does-not-exist'

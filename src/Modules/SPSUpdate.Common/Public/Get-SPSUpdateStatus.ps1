@@ -33,7 +33,10 @@
         return @()
     }
 
-    $files = Get-ChildItem -Path $CampaignPath -Filter '*.json' -File -ErrorAction SilentlyContinue |
+    # Scope files are always named '<Server>__<Scope>.json'. Match that shape (not every *.json)
+    # so a stray non-scope JSON in the campaign folder (for example an inventory snapshot) is never
+    # mis-read as a scope and counted in the roll-up.
+    $files = Get-ChildItem -Path $CampaignPath -Filter '*__*.json' -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notlike '*.tmp.*' }
 
     $records = New-Object System.Collections.Generic.List[object]

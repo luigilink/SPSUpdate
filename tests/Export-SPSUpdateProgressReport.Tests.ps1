@@ -136,6 +136,29 @@ Describe 'Export-SPSUpdateProgressReport (pre-patch anomaly)' {
     }
 }
 
+Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {
+    It 'counts a failed non-card scope (SideBySide) so the campaign is not falsely green' {
+        $camp = New-Campaign -Name 'rollup-fail'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'SideBySide' -Phase 'SideBySide' -Server 'WFE1' -State 'Failed' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match 'Failed <span class="n">1</span>'
+        $h | Should -Match 'color:var\(--err\)'
+    }
+
+    It 'counts inventory databases with no processing item yet as pending work' {
+        $camp = New-Campaign -Name 'rollup-pending'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        $inv = New-Inventory -Path (Join-Path $camp 'inv.json')
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $inv
+        $h = Get-Content -Path $out -Raw
+        # 1 server done + 2 inventory databases still pending = 33% complete, 2 pending.
+        $h | Should -Match 'Pending <span class="n">2</span>'
+        $h | Should -Match '>33%<'
+    }
+}
+
 Describe 'Export-SPSUpdateProgressReport (encoding)' {
     It 'HTML-encodes dynamic values' {
         $camp = New-Campaign -Name 'enc'

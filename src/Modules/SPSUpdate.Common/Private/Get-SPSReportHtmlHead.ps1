@@ -94,6 +94,34 @@ td .sub2{color:var(--muted-fg);font-size:12px}
 .ok-txt{color:var(--ok)}.warn-txt{color:var(--warn)}.muted-txt{color:var(--muted-fg)}
 .footer{color:var(--muted-fg);font-size:12px;text-align:center;margin-top:26px}
 .footer a{color:inherit}
+/* ---- ContentDatabase inventory report (Export-SPSUpdateDbReport) ---- */
+.meta{color:var(--muted-fg);font-size:12px;margin-bottom:16px}
+.summary{background:var(--card-2);border:1px solid var(--border);border-left:4px solid var(--primary);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.summary h3{color:var(--foreground);font-size:14px;margin:0 0 10px}
+.cards{display:flex;flex-wrap:wrap;gap:12px}
+.cards .card{padding:12px 16px;min-width:120px}
+.card-value{font-size:24px;font-weight:700;color:var(--primary)}
+.card-label{font-size:12px;color:var(--muted-fg)}
+.card-sub{font-size:11px;color:var(--muted-fg);margin-top:2px}
+.dist{margin-top:14px}
+.dist-row{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12px}
+.dist-name{width:90px;color:var(--foreground);font-weight:600}
+.dist-track{flex:1;background:var(--card);border:1px solid var(--border);border-radius:4px;height:16px;overflow:hidden}
+.dist-fill{background:var(--primary);height:100%}
+.dist-val{width:170px;text-align:right;color:var(--muted-fg)}
+.controls{display:flex;justify-content:space-between;align-items:center;margin:12px 0;flex-wrap:wrap;gap:8px}
+.search{padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:13px;width:280px;max-width:100%;background:var(--card);color:var(--foreground)}
+.pager{display:flex;gap:8px;align-items:center;font-size:12px}
+.pager button{padding:4px 10px;border:1px solid var(--border);background:var(--card-2);color:var(--foreground);border-radius:4px;cursor:pointer}
+.pager button:disabled{opacity:.4;cursor:default}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff}
+.badge.Pending{background:var(--muted)}.badge.Running{background:var(--info)}.badge.Done{background:var(--ok)}
+.badge.Failed{background:var(--err)}.badge.Warning{background:var(--warn);color:#222}.badge.Skipped{background:var(--muted)}
+table:not(.grid){border-collapse:collapse;width:100%;font-size:12px}
+table:not(.grid) thead th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--muted-fg);background:var(--card-2);position:sticky;top:0;cursor:pointer}
+table:not(.grid) tbody td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+table:not(.grid) td.num,table:not(.grid) th.num{text-align:right;font-variant-numeric:tabular-nums}
+table:not(.grid) tbody tr:nth-child(even){background:var(--hover)}
 '@
 
     $refreshTag = if ($RefreshSeconds -gt 0) { "<meta http-equiv=`"refresh`" content=`"$RefreshSeconds`">" } else { '' }

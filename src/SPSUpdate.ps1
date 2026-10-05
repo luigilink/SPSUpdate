@@ -344,7 +344,17 @@ function Write-SPSDashboard {
             EnvName      = $Environment
             AppCode      = $Application
             FarmName     = $spFarmName
-            MasterServer = $thisServer
+        }
+        # The campaign master is the server that runs the orchestrating Default run; it is persisted
+        # once (master.txt) so worker runs (distributed ProductUpdate, ConfirmReboot) that also
+        # regenerate the dashboard tag the right server as master instead of themselves.
+        $masterMarker = Join-Path -Path $statusCampaignPath -ChildPath 'master.txt'
+        if (Test-Path -Path $masterMarker) {
+            try {
+                $masterName = (Get-Content -Path $masterMarker -Raw -ErrorAction Stop).Trim()
+                if (-not [string]::IsNullOrEmpty($masterName)) { $params.MasterServer = $masterName }
+            }
+            catch { Write-Verbose -Message "Could not read the campaign master marker: $($_.Exception.Message)" }
         }
         if (Test-Path -Path $spsUpdateDBsPath) { $params.ContentDbInventoryFile = $spsUpdateDBsPath }
         if ($Completed) { $params.Completed = $true }
@@ -365,6 +375,13 @@ function Initialize-SPSDashboardBaseline {
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     if (-not (Get-Command -Name Get-SPServer -ErrorAction SilentlyContinue)) { return }
     try {
+        # Persist the campaign master (this orchestrator) so every dashboard render tags it, even
+        # when a worker run regenerates the dashboard.
+        $masterMarker = Join-Path -Path $statusCampaignPath -ChildPath 'master.txt'
+        if (-not (Test-Path -Path $masterMarker)) {
+            try { Set-Content -Path $masterMarker -Value $thisServer -Encoding UTF8 -Force -ErrorAction Stop }
+            catch { Write-Verbose -Message "Could not persist the campaign master marker: $($_.Exception.Message)" }
+        }
         $farmBuild = ''
         try { $farmBuild = (Get-SPFarm).BuildVersion.ToString() } catch { $farmBuild = '' }
         $existing = @(Get-SPSUpdateStatus -CampaignPath $statusCampaignPath)
@@ -378,10 +395,18 @@ function Initialize-SPSDashboardBaseline {
             if ($patch -eq 'NoActionRequired') { $patch = 'No Action Required' }
             foreach ($scope in @('ProductUpdate', 'Wizard')) {
                 $phase = $scope
-                $hasScope = @($existing | Where-Object { $_.Server -eq $name -and $_.Scope -eq $scope }).Count -gt 0
-                if ($hasScope) {
-                    # Refresh metadata only; never reset an in-progress state.
-                    Write-SPSStatus -Scope $scope -Phase $phase -Server $name -Role $role -Build $farmBuild -PatchStatus $patch
+                $scopeRecord = @($existing | Where-Object { $_.Server -eq $name -and $_.Scope -eq $scope }) | Select-Object -First 1
+                if ($null -ne $scopeRecord) {
+                    # Refresh metadata only; never reset an in-progress state. Preserve a build already
+                    # recorded by ProductUpdate (the installed CU) - the farm build can still be the
+                    # previous CU until PSConfig runs, so only seed it when no build is recorded yet.
+                    $hasBuild = -not [string]::IsNullOrEmpty("$($scopeRecord.Build)")
+                    if ($hasBuild) {
+                        Write-SPSStatus -Scope $scope -Phase $phase -Server $name -Role $role -PatchStatus $patch
+                    }
+                    else {
+                        Write-SPSStatus -Scope $scope -Phase $phase -Server $name -Role $role -Build $farmBuild -PatchStatus $patch
+                    }
                 }
                 else {
                     Write-SPSStatus -Scope $scope -Phase $phase -Server $name -State 'Pending' -Role $role -Build $farmBuild -PatchStatus $patch -Detail 'Awaiting patching'
@@ -771,16 +796,23 @@ switch ($Action) {
             else {
                 if (Test-Path -Path $statusCampaignPath) {
                     Write-Output "Resetting patching status store campaign: $statusCampaignPath"
-                    # Archive the previous dashboard before clearing, so campaign history is kept.
-                    if (-not [string]::IsNullOrEmpty($statusDashboardPath) -and (Test-Path -Path $statusDashboardPath)) {
+                    # Archive the previous dashboard(s) before clearing, so campaign history is kept.
+                    # Includes the legacy '_dashboard.html' name used before the per-farm filename,
+                    # so an upgrade from an older version still archives rather than deletes it.
+                    $dashboardsToArchive = @()
+                    if (-not [string]::IsNullOrEmpty($statusDashboardPath)) { $dashboardsToArchive += $statusDashboardPath }
+                    $legacyDashboard = Join-Path -Path $statusCampaignPath -ChildPath '_dashboard.html'
+                    if ($dashboardsToArchive -notcontains $legacyDashboard) { $dashboardsToArchive += $legacyDashboard }
+                    foreach ($dashToArchive in $dashboardsToArchive) {
+                        if ([string]::IsNullOrEmpty($dashToArchive) -or -not (Test-Path -Path $dashToArchive)) { continue }
                         try {
                             $historyFolder = Join-Path -Path $statusCampaignPath -ChildPath 'history'
                             if (-not (Test-Path -Path $historyFolder)) {
                                 New-Item -Path $historyFolder -ItemType Directory -Force | Out-Null
                             }
-                            $dashLeaf = [System.IO.Path]::GetFileNameWithoutExtension($statusDashboardPath)
+                            $dashLeaf = [System.IO.Path]::GetFileNameWithoutExtension($dashToArchive)
                             $archiveName = '{0}_{1}.html' -f $dashLeaf, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss')
-                            Move-Item -Path $statusDashboardPath -Destination (Join-Path -Path $historyFolder -ChildPath $archiveName) -Force -ErrorAction Stop
+                            Move-Item -Path $dashToArchive -Destination (Join-Path -Path $historyFolder -ChildPath $archiveName) -Force -ErrorAction Stop
                             Write-Output "Archived the previous dashboard to history\$archiveName"
                         }
                         catch {

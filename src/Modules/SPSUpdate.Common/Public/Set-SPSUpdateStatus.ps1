@@ -193,9 +193,16 @@
     if ($PSBoundParameters.ContainsKey('Role')) { $record.Role = $Role }
     if ($PSBoundParameters.ContainsKey('Build')) { $record.Build = $Build }
     if ($PSBoundParameters.ContainsKey('PatchStatus')) { $record.PatchStatus = $PatchStatus }
-    # Stamp the completion time once, the first time the scope reaches a terminal success state.
-    if ($PSBoundParameters.ContainsKey('State') -and ($State -eq 'Done' -or $State -eq 'Skipped') -and $null -eq $record.CompletedAt) {
-        $record.CompletedAt = $now
+    # Stamp the completion time the first time the scope reaches a terminal success state, and
+    # clear it if the scope is re-attempted (back to Pending/Running) so a later run does not show
+    # a stale completion date. Repeated terminal writes keep the original stamp (idempotent).
+    if ($PSBoundParameters.ContainsKey('State')) {
+        if ($State -eq 'Done' -or $State -eq 'Skipped') {
+            if ($null -eq $record.CompletedAt) { $record.CompletedAt = $now }
+        }
+        elseif ($State -eq 'Pending' -or $State -eq 'Running') {
+            $record.CompletedAt = $null
+        }
     }
 
     # Upsert the optional item.

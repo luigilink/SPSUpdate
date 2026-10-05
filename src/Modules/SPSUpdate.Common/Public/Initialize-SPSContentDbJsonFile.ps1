@@ -24,6 +24,7 @@
         [System.String]$WebAppUrl
         [System.Int64]$SizeInBytes
         [System.Double]$SizeInMB
+        [System.String]$UpgradeStatus
     }
 
     # Get all content databases. Use -ErrorAction Stop so a genuine query failure
@@ -63,11 +64,15 @@
                 }
             }
             [void]$sequenceLists[$minIndex].Add([SPDbContent]@{
-                    Name        = $spDatabase.Name;
-                    Server      = $spDatabase.Server;
-                    WebAppUrl   = $spDatabase.WebApplication.Url;
-                    SizeInBytes = [System.Int64]$spDatabase.DiskSizeRequired;
-                    SizeInMB    = [System.Math]::Round($spDatabase.DiskSizeRequired / 1MB, 0);
+                    Name          = $spDatabase.Name;
+                    Server        = $spDatabase.Server;
+                    WebAppUrl     = $spDatabase.WebApplication.Url;
+                    SizeInBytes   = [System.Int64]$spDatabase.DiskSizeRequired;
+                    SizeInMB      = [System.Math]::Round($spDatabase.DiskSizeRequired / 1MB, 0);
+                    # Pre-patch baseline shown on the dashboard. A healthy farm reports
+                    # 'No update pending'; 'Upgrade available' flags a database already needing
+                    # an upgrade before any CU is installed (surfaced as an informational anomaly).
+                    UpgradeStatus = if ($spDatabase.NeedsUpgrade) { 'Upgrade available' } else { 'No update pending' };
                 })
             $sequenceLoad[$minIndex] += $spDatabase.DiskSizeRequired
         }

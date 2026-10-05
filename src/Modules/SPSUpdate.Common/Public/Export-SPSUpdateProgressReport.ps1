@@ -197,6 +197,7 @@
     $dbRows = @()
     $dbCount = 0
     $dbUpgrading = 0
+    $dbInvNames = @{}
     $inventory = $null
     if (-not [string]::IsNullOrWhiteSpace($ContentDbInventoryFile) -and (Test-Path -Path $ContentDbInventoryFile)) {
         try { $inventory = Get-Content -Path $ContentDbInventoryFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { $inventory = $null }
@@ -209,6 +210,8 @@
             foreach ($db in @($inventory.$prop)) {
                 if ($null -eq $db -or [string]::IsNullOrEmpty("$($db.Name)")) { continue }
                 $dbCount++
+                $dbNameKey = "$($db.Name)".ToLowerInvariant()
+                $dbInvNames[$dbNameKey] = $true
                 $size = ''
                 if ($db.PSObject.Properties.Name -contains 'SizeInMB' -and "$($db.SizeInMB)" -ne '') {
                     $size = '{0:N0}' -f ([double]$db.SizeInMB)
@@ -233,11 +236,32 @@
         $dbRows = @('<tr><td colspan="7" class="muted-txt">No content database inventory for this campaign.</td></tr>')
     }
 
-    # ---- Summary roll-up (servers + databases as leaf units) ----------------------
+    # ---- Summary roll-up (every scope contributes leaf units so no failure is hidden) ---
+    # A scope with named items contributes one unit per item; otherwise the scope itself is one
+    # unit. This covers the server cards (ProductUpdate/Wizard), the content-database items and
+    # ALSO the Reboot / SideBySide / sequence-level scopes that have no card, so a failed campaign
+    # step can never be rolled up as green 100%.
     $units = @()
-    $units += @($binaries | ForEach-Object { $_.State })
-    $units += @($wizard | ForEach-Object { $_.State })
-    $units += @($dbScopes | ForEach-Object { @($_.Items) } | Where-Object { $_ -and "$($_.Name)" -ne '' } | ForEach-Object { $_.State })
+    $recordedDbNames = @{}
+    foreach ($sc in $scopes) {
+        $named = @($sc.Items | Where-Object { $_ -and "$($_.Name)" -ne '' })
+        if ($named.Count -gt 0) {
+            foreach ($it in $named) {
+                $units += "$($it.State)"
+                if ($sc.Phase -eq 'Mount' -or $sc.Phase -eq 'Upgrade' -or $sc.Phase -eq 'Sequence') {
+                    $recordedDbNames["$($it.Name)".ToLowerInvariant()] = $true
+                }
+            }
+        }
+        else {
+            $units += "$($sc.State)"
+        }
+    }
+    # Content databases from the inventory that have no processing item yet are still pending work:
+    # count them so completion reflects the whole farm (and cannot reach 100% with rows pending).
+    foreach ($nm in $dbInvNames.Keys) {
+        if (-not $recordedDbNames.ContainsKey($nm)) { $units += 'Pending' }
+    }
     $total = $units.Count
     $countDone = @($units | Where-Object { $_ -eq 'Done' -or $_ -eq 'Skipped' }).Count
     $countRunning = @($units | Where-Object { $_ -eq 'Running' }).Count
@@ -249,7 +273,7 @@
     $runPctSeg = if ($total -gt 0) { [math]::Round($countRunning / $total * 100, 2) } else { 0 }
     $pctColor = if ($countFailed -gt 0) { 'var(--err)' } elseif ($pct -eq 100) { 'var(--ok)' } else { 'var(--primary)' }
 
-    $serverCount = @($binaries.Server + $wizard.Server | Select-Object -Unique).Count
+    $serverCount = @(@($binaries.Server) + @($wizard.Server) | Select-Object -Unique).Count
     $binDone = @($binaries | Where-Object { $_.State -eq 'Done' -or $_.State -eq 'Skipped' }).Count
     $wizDone = @($wizard | Where-Object { $_.State -eq 'Done' -or $_.State -eq 'Skipped' }).Count
     $rebootPendingCount = @($rebootPendingServers).Count
