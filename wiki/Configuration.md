@@ -208,6 +208,38 @@ by your interactive/master run under your own account, still show — which can 
 problem). Run `Test-SPSUpdateReadiness.ps1` to verify both your account and the InstallAccount
 can write to the store before patching.
 
+## Dashboard (live HTML report)
+
+The near real-time dashboard is organised as three cards:
+
+- **Binaries Installation** — one row per farm server: status, SharePoint patch status
+  (`No Action Required` before patching), installed build and completion time.
+- **SharePoint Configuration Wizard** — the same, plus a detail column.
+- **Content Databases** — one row per content database: web application, SQL instance, size,
+  sequence, upgrade status (`No update pending` when up to date) and processing state.
+
+At the start of the master `Default` run the farm is enumerated with `Get-SPServer` and a
+baseline row is pre-filled per server, so the whole farm is visible up front. Because a healthy
+farm reports `No Action Required` (servers) and `No update pending` (databases) before a CU is
+installed, a server or database that is **not** in that state is highlighted as an informational
+**pre-patch inconsistency** banner — a quick health check before patching. The card wording
+matches the Central Administration pages exactly.
+
+```powershell
+Dashboard = @{
+    OutputPath = 'E:\inetpub\spsupdate'   # existing IIS folder; empty = campaign folder
+}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `Dashboard.OutputPath` | An **existing** folder (for example an IIS site folder) where the dashboard HTML is written so it can be served over HTTP. SPSUpdate does not create the IIS site — create it once (like the SPSConfigKit pull-server dashboard) and point `OutputPath` at its folder. | `''` (campaign folder) |
+
+The dashboard file name is derived per farm — `<App>-<Env>-<Farm>-dashboard.html` — so several
+farms (INT / Preprod / PROD) can share a single IIS folder without colliding. At the start of a
+new campaign (`-Action ResetStatus`) the previous dashboard is archived to
+`history\<name>_<timestamp>.html` before a fresh one is created.
+
 ## Remoting (CredSSP and authentication fallback)
 
 SPSUpdate runs the Configuration Wizard and side-by-side copy on **other** farm servers over
