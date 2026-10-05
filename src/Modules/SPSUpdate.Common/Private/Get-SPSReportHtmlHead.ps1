@@ -127,5 +127,9 @@ table:not(.grid) tbody tr:nth-child(even){background:var(--hover)}
 '@
 
     $refreshTag = if ($RefreshSeconds -gt 0) { "<meta http-equiv=`"refresh`" content=`"$RefreshSeconds`">" } else { '' }
-    return "<!DOCTYPE html><html lang=`"en`" data-theme=`"dark`"><head><meta charset=`"utf-8`"><meta name=`"viewport`" content=`"width=device-width, initial-scale=1`">$refreshTag<title>$Title</title><style>$css</style></head><body><div class=`"wrap`">"
+    # Restore a previously chosen theme as early as possible (before paint) so the periodic
+    # meta-refresh does not reset the user's light/dark selection. Falls back silently to the
+    # default dark theme when browser storage is unavailable (e.g. sandboxed file:// contexts).
+    $themeInit = "<script>(function(){try{var t=localStorage.getItem('spsupdate-theme');if(t){document.documentElement.dataset.theme=t;}}catch(e){}})();</script>"
+    return "<!DOCTYPE html><html lang=`"en`" data-theme=`"dark`"><head><meta charset=`"utf-8`"><meta name=`"viewport`" content=`"width=device-width, initial-scale=1`">$refreshTag<title>$Title</title><style>$css</style>$themeInit</head><body><div class=`"wrap`">"
 }

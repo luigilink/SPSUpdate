@@ -313,7 +313,8 @@ function Write-SPSStatus {
         [System.Nullable[int]] $ExitCode,
         [System.String] $Role,
         [System.String] $Build,
-        [System.String] $PatchStatus
+        [System.String] $PatchStatus,
+        [switch] $SeedIfAbsent
     )
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     try {
@@ -328,6 +329,7 @@ function Write-SPSStatus {
         if ($PSBoundParameters.ContainsKey('Role')) { $params.Role = $Role }
         if ($PSBoundParameters.ContainsKey('Build')) { $params.Build = $Build }
         if ($PSBoundParameters.ContainsKey('PatchStatus')) { $params.PatchStatus = $PatchStatus }
+        if ($SeedIfAbsent) { $params.SeedIfAbsent = $true }
         $null = Set-SPSUpdateStatus @params
     }
     catch {
@@ -474,7 +476,6 @@ function Initialize-SPSDashboardBaseline {
         }
         $farmBuild = ''
         try { $farmBuild = (Get-SPFarm).BuildVersion.ToString() } catch { $farmBuild = '' }
-        $existing = @(Get-SPSUpdateStatus -CampaignPath $statusCampaignPath)
         $farmServers = @(Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' })
         foreach ($srv in $farmServers) {
             $name = "$($srv.Name)"
@@ -484,23 +485,11 @@ function Initialize-SPSDashboardBaseline {
             # 'NoActionRequired' (API) is shown with the exact Central Admin wording.
             if ($patch -eq 'NoActionRequired') { $patch = 'No Action Required' }
             foreach ($scope in @('ProductUpdate', 'Wizard')) {
-                $phase = $scope
-                $scopeRecord = @($existing | Where-Object { $_.Server -eq $name -and $_.Scope -eq $scope }) | Select-Object -First 1
-                if ($null -ne $scopeRecord) {
-                    # Refresh metadata only; never reset an in-progress state. Preserve a build already
-                    # recorded by ProductUpdate (the installed CU) - the farm build can still be the
-                    # previous CU until PSConfig runs, so only seed it when no build is recorded yet.
-                    $hasBuild = -not [string]::IsNullOrEmpty("$($scopeRecord.Build)")
-                    if ($hasBuild) {
-                        Write-SPSStatus -Scope $scope -Phase $phase -Server $name -Role $role -PatchStatus $patch
-                    }
-                    else {
-                        Write-SPSStatus -Scope $scope -Phase $phase -Server $name -Role $role -Build $farmBuild -PatchStatus $patch
-                    }
-                }
-                else {
-                    Write-SPSStatus -Scope $scope -Phase $phase -Server $name -State 'Pending' -Role $role -Build $farmBuild -PatchStatus $patch -Detail 'Awaiting patching'
-                }
+                # Seed-if-absent (race-safe inside the per-scope lock): creates the Pending baseline
+                # row when the scope does not exist, otherwise only enriches the farm metadata
+                # (Role/PatchStatus, and Build only when none is recorded) without ever overwriting a
+                # worker's state - even if the owning server's worker starts the scope concurrently.
+                Write-SPSStatus -Scope $scope -Phase $scope -Server $name -State 'Pending' -Role $role -Build $farmBuild -PatchStatus $patch -Detail 'Awaiting patching' -SeedIfAbsent
             }
         }
         # Publish the master's inventory as the authoritative campaign snapshot for all renderers.

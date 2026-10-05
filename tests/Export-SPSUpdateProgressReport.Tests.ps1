@@ -232,6 +232,18 @@ Describe 'Export-SPSUpdateProgressReport (card consistency)' {
         # The Wizard card must show the installed ProductUpdate build, not the stale baseline build.
         ([regex]::Matches($h, '16\.0\.20326\.20136')).Count | Should -BeGreaterThan 1
     }
+
+    It 'reflects a failed sequence scope on its still-running database item' {
+        $camp = New-Campaign -Name 'dbfail'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -State 'Failed' -Item 'WSS_Content_Portal' -ItemState 'Running' -Confirm:$false | Out-Null
+        $inv = New-Inventory -Path (Join-Path $camp 'inv.json')
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $inv
+        $h = Get-Content -Path $out -Raw
+        # The database row for the failed scope's running item must show Failed, not Running.
+        $h | Should -Match 'WSS_Content_Portal'
+        $h | Should -Match '<span class="pill failed">Failed</span>'
+        $h | Should -Not -Match 'WSS_Content_Portal.*pill running'
+    }
 }
 
 Describe 'Export-SPSUpdateProgressReport (encoding)' {

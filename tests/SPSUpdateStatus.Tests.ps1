@@ -108,6 +108,33 @@ Describe 'Set-SPSUpdateStatus completion timestamp' {
     }
 }
 
+Describe 'Set-SPSUpdateStatus -SeedIfAbsent (baseline enrichment)' {
+    BeforeAll {
+        $script:campSeed = Join-Path -Path $script:root -ChildPath 'campaign-seed'
+    }
+
+    It 'creates a Pending baseline row when the scope does not exist' {
+        Set-SPSUpdateStatus -CampaignPath $script:campSeed -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Pending' -Role 'WebFrontEnd' -Build '16.0.17928.20286' -PatchStatus 'No Action Required' -Detail 'Awaiting patching' -SeedIfAbsent -Confirm:$false | Out-Null
+        $r = Get-SPSUpdateStatus -CampaignPath $script:campSeed | Where-Object { $_.Server -eq 'WFE1' }
+        $r.State | Should -Be 'Pending'
+        $r.Role | Should -Be 'WebFrontEnd'
+        $r.PatchStatus | Should -Be 'No Action Required'
+    }
+
+    It 'never overwrites an in-progress worker state, only enriches farm metadata' {
+        # Worker owns the scope: Running with an installed build and a completion detail.
+        Set-SPSUpdateStatus -CampaignPath $script:campSeed -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Build '16.0.20326.20136' -Detail 'CU installed' -Confirm:$false | Out-Null
+        # Master baseline seeds the same scope with the older farm build and a Pending state.
+        Set-SPSUpdateStatus -CampaignPath $script:campSeed -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Pending' -Role 'Application' -Build '16.0.17928.20286' -PatchStatus 'No Action Required' -Detail 'Awaiting patching' -SeedIfAbsent -Confirm:$false | Out-Null
+        $r = Get-SPSUpdateStatus -CampaignPath $script:campSeed | Where-Object { $_.Server -eq 'APP1' }
+        $r.State | Should -Be 'Done'                       # worker state preserved
+        $r.Detail | Should -Be 'CU installed'              # worker detail preserved
+        $r.Build | Should -Be '16.0.20326.20136'           # installed build preserved (not overwritten)
+        $r.Role | Should -Be 'Application'                 # farm metadata enriched
+        $r.PatchStatus | Should -Be 'No Action Required'   # farm metadata enriched
+    }
+}
+
 Describe 'Get-SPSUpdateStatus resilience' {
     It 'returns an empty array for a missing campaign folder' {
         $missing = Join-Path -Path $script:root -ChildPath 'does-not-exist'

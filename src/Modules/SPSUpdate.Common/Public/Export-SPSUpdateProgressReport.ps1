@@ -203,12 +203,18 @@
     if (-not $wizRows) { $wizRows = '<tr><td colspan="6" class="muted-txt">No wizard status yet.</td></tr>' }
 
     # ---- Card 3: Content Databases ------------------------------------------------
-    # Build a per-database processing state lookup from the sequence/mount/upgrade items.
+    # Build a per-database processing state lookup from the sequence/mount/upgrade items. When a
+    # sequence scope failed, its still-active (Running/Pending) item is reflected as Failed - the
+    # sequence handler marks only the scope on error and leaves the item Running - while completed
+    # items keep their terminal state.
     $dbStateByName = @{}
     foreach ($sc in $dbScopes) {
+        $scopeFailed = ("$($sc.State)" -eq 'Failed')
         foreach ($it in @($sc.Items)) {
             if ($null -ne $it -and -not [string]::IsNullOrEmpty("$($it.Name)")) {
-                $dbStateByName["$($it.Name)".ToLowerInvariant()] = $it.State
+                $itState = "$($it.State)"
+                if ($scopeFailed -and ($itState -eq 'Running' -or $itState -eq 'Pending')) { $itState = 'Failed' }
+                $dbStateByName["$($it.Name)".ToLowerInvariant()] = $itState
             }
         }
     }
@@ -367,7 +373,7 @@
     # ---- Assemble -----------------------------------------------------------------
     $html = (Get-SPSReportHtmlHead -Title (& $enc $Title) -RefreshSeconds $effectiveRefresh) +
     '<header class="page">' +
-    '<button class="theme-toggle" onclick="var h=document.documentElement;h.dataset.theme=h.dataset.theme===''dark''?''light'':''dark'';">Theme</button>' +
+    '<button class="theme-toggle" onclick="var h=document.documentElement;var n=h.dataset.theme===''dark''?''light'':''dark'';h.dataset.theme=n;try{localStorage.setItem(''spsupdate-theme'',n);}catch(e){}">Theme</button>' +
     '<p class="eyebrow">SPSUpdate &middot; Patching Dashboard</p>' +
     "<h1>$(& $enc $Title)</h1>" +
     '<p class="sub">Near real-time view of the current cumulative-update campaign across the farm.</p>' +
