@@ -78,6 +78,83 @@ Describe 'Set-SPSUpdateStatus / Get-SPSUpdateStatus round-trip' {
     }
 }
 
+Describe 'Set-SPSUpdateStatus completion timestamp' {
+    BeforeAll {
+        $script:campCompleted = Join-Path -Path $script:root -ChildPath 'campaign-completed'
+    }
+
+    It 'stamps CompletedAt when a scope first reaches a terminal success state' {
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        $r = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'APP1' }
+        $r.CompletedAt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'clears CompletedAt when the scope is re-attempted and re-stamps it on the next terminal state' {
+        # Skipped (out of install window) stamps a completion time.
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Skipped' -Confirm:$false | Out-Null
+        $skipped = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'WFE1' }
+        $firstStamp = $skipped.CompletedAt
+        $firstStamp | Should -Not -BeNullOrEmpty
+
+        # A later in-window attempt goes Running: the stale completion date must be cleared.
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Running' -Confirm:$false | Out-Null
+        $running = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'WFE1' }
+        $running.CompletedAt | Should -BeNullOrEmpty
+
+        # The eventual Done stamps a fresh completion time.
+        Set-SPSUpdateStatus -CampaignPath $script:campCompleted -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Done' -Confirm:$false | Out-Null
+        $done = Get-SPSUpdateStatus -CampaignPath $script:campCompleted | Where-Object { $_.Server -eq 'WFE1' }
+        $done.CompletedAt | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Set-SPSUpdateStatus -SeedIfAbsent (baseline enrichment)' {
+    BeforeAll {
+        $script:campSeed = Join-Path -Path $script:root -ChildPath 'campaign-seed'
+    }
+
+    It 'creates a Pending baseline row when the scope does not exist' {
+        Set-SPSUpdateStatus -CampaignPath $script:campSeed -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Pending' -Role 'WebFrontEnd' -Build '16.0.17928.20286' -PatchStatus 'No Action Required' -Detail 'Awaiting patching' -SeedIfAbsent -Confirm:$false | Out-Null
+        $r = Get-SPSUpdateStatus -CampaignPath $script:campSeed | Where-Object { $_.Server -eq 'WFE1' }
+        $r.State | Should -Be 'Pending'
+        $r.Role | Should -Be 'WebFrontEnd'
+        $r.PatchStatus | Should -Be 'No Action Required'
+    }
+
+    It 'never overwrites an in-progress worker state, only enriches farm metadata' {
+        # Worker owns the scope: Running with an installed build and a completion detail.
+        Set-SPSUpdateStatus -CampaignPath $script:campSeed -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Build '16.0.20326.20136' -Detail 'CU installed' -Confirm:$false | Out-Null
+        # Master baseline seeds the same scope with the older farm build and a Pending state.
+        Set-SPSUpdateStatus -CampaignPath $script:campSeed -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Pending' -Role 'Application' -Build '16.0.17928.20286' -PatchStatus 'No Action Required' -Detail 'Awaiting patching' -SeedIfAbsent -Confirm:$false | Out-Null
+        $r = Get-SPSUpdateStatus -CampaignPath $script:campSeed | Where-Object { $_.Server -eq 'APP1' }
+        $r.State | Should -Be 'Done'                       # worker state preserved
+        $r.Detail | Should -Be 'CU installed'              # worker detail preserved
+        $r.Build | Should -Be '16.0.20326.20136'           # installed build preserved (not overwritten)
+        $r.Role | Should -Be 'Application'                 # farm metadata enriched
+        $r.PatchStatus | Should -Be 'No Action Required'   # farm metadata enriched
+    }
+
+    It 'skips the write (no lost update) when the scope lock cannot be acquired' {
+        $camp = Join-Path -Path $script:root -ChildPath 'campaign-locked'
+        New-Item -Path $camp -ItemType Directory -Force | Out-Null
+        # Worker records Done.
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Build '16.0.20326.20136' -Confirm:$false | Out-Null
+        # Simulate a fresh, held lock by creating the sibling .lock file and keeping the handle open.
+        $lockPath = Join-Path -Path $camp -ChildPath 'APP1__ProductUpdate.json.lock'
+        $held = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+            # A baseline enrichment cannot take the lock and must skip rather than clobber.
+            Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Pending' -Role 'Application' -SeedIfAbsent -Confirm:$false -WarningAction SilentlyContinue | Out-Null
+            $r = Get-SPSUpdateStatus -CampaignPath $camp | Where-Object { $_.Server -eq 'APP1' }
+            $r.State | Should -Be 'Done'   # the Done state was not overwritten
+        }
+        finally {
+            $held.Close(); $held.Dispose()
+            Remove-Item -Path $lockPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Describe 'Get-SPSUpdateStatus resilience' {
     It 'returns an empty array for a missing campaign folder' {
         $missing = Join-Path -Path $script:root -ChildPath 'does-not-exist'

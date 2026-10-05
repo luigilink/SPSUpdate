@@ -221,6 +221,15 @@ function Get-SPSUpdateConfiguration {
         $config.StatusStorePath = ''
     }
 
+    # Dashboard.OutputPath (optional): an existing folder (for example an IIS site folder) where
+    # the live dashboard HTML is written instead of the campaign folder. Empty = campaign folder.
+    if (-not $config.ContainsKey('Dashboard') -or $null -eq $config.Dashboard) {
+        $config.Dashboard = @{}
+    }
+    if (-not $config.Dashboard.ContainsKey('OutputPath')) {
+        $config.Dashboard.OutputPath = ''
+    }
+
     return $config
 }
 
@@ -270,7 +279,33 @@ try {
 catch {
     Write-Warning -Message "Could not resolve the status store campaign path: $($_.Exception.Message)"
 }
-$statusDashboardPath = if ($null -ne $statusCampaignPath) { Join-Path -Path $statusCampaignPath -ChildPath '_dashboard.html' } else { $null }
+$statusDashboardPath = $null
+$statusDashboardCampaignPath = $null
+$statusDashboardOutputIsShared = $false
+if ($null -ne $statusCampaignPath) {
+    # Dashboard file name is derived per farm (<App>-<Env>-<Farm>-dashboard.html) so several
+    # farms (INT / Preprod / PROD) can share one IIS folder without colliding.
+    $spsUpdateDashboardFile = "$($Application)-$($Environment)-$($spFarmName)-dashboard.html"
+    $statusDashboardCampaignPath = Join-Path -Path $statusCampaignPath -ChildPath $spsUpdateDashboardFile
+    $dashboardOutputFolder = $statusCampaignPath
+    if (-not [string]::IsNullOrWhiteSpace($envCfg.Dashboard.OutputPath)) {
+        if (Test-Path -Path $envCfg.Dashboard.OutputPath) {
+            $dashboardOutputFolder = $envCfg.Dashboard.OutputPath
+            # A UNC OutputPath (\\server\share\... or //server/share/...) is reachable by every
+            # farm server, so worker runs may safely publish the hosted copy to it (e.g. a deferred
+            # ConfirmReboot that finishes after the master Default run exits). A drive-letter path is
+            # treated as master-local: only the master writes it, workers render to the campaign
+            # folder. (UNC is identified by the leading double separator; IsPathRooted is avoided as
+            # it is platform-dependent for backslash paths.)
+            $outTrim = "$dashboardOutputFolder"
+            $statusDashboardOutputIsShared = ($outTrim.StartsWith('\\') -or $outTrim.StartsWith('//'))
+        }
+        else {
+            Write-Warning -Message "Dashboard.OutputPath '$($envCfg.Dashboard.OutputPath)' does not exist; writing the dashboard to the campaign folder instead."
+        }
+    }
+    $statusDashboardPath = Join-Path -Path $dashboardOutputFolder -ChildPath $spsUpdateDashboardFile
+}
 
 # Local helper: best-effort status write. Never blocks the run on a status failure.
 function Write-SPSStatus {
@@ -284,7 +319,11 @@ function Write-SPSStatus {
         [System.String] $Item,
         [System.String] $ItemState,
         [System.String] $ItemDetail,
-        [System.Nullable[int]] $ExitCode
+        [System.Nullable[int]] $ExitCode,
+        [System.String] $Role,
+        [System.String] $Build,
+        [System.String] $PatchStatus,
+        [switch] $SeedIfAbsent
     )
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     try {
@@ -296,6 +335,10 @@ function Write-SPSStatus {
         if ($PSBoundParameters.ContainsKey('ItemState')) { $params.ItemState = $ItemState }
         if ($PSBoundParameters.ContainsKey('ItemDetail')) { $params.ItemDetail = $ItemDetail }
         if ($PSBoundParameters.ContainsKey('ExitCode') -and $null -ne $ExitCode) { $params.ExitCode = $ExitCode }
+        if ($PSBoundParameters.ContainsKey('Role')) { $params.Role = $Role }
+        if ($PSBoundParameters.ContainsKey('Build')) { $params.Build = $Build }
+        if ($PSBoundParameters.ContainsKey('PatchStatus')) { $params.PatchStatus = $PatchStatus }
+        if ($SeedIfAbsent) { $params.SeedIfAbsent = $true }
         $null = Set-SPSUpdateStatus @params
     }
     catch {
@@ -305,7 +348,7 @@ function Write-SPSStatus {
 
 # Local helper: (re)generate the live dashboard from the status store.
 function Write-SPSDashboard {
-    param([switch] $Completed)
+    param([switch] $Completed, [switch] $InitialPublish)
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     try {
         $params = @{
@@ -315,11 +358,162 @@ function Write-SPSDashboard {
             AppCode      = $Application
             FarmName     = $spFarmName
         }
+        # The campaign master is the server that runs the orchestrating Default run; it is persisted
+        # once (master.txt) so worker runs (distributed ProductUpdate, ConfirmReboot) that also
+        # regenerate the dashboard tag the right server as master instead of themselves.
+        $masterMarker = Join-Path -Path $statusCampaignPath -ChildPath 'master.txt'
+        if (Test-Path -Path $masterMarker) {
+            try {
+                $masterName = (Get-Content -Path $masterMarker -Raw -ErrorAction Stop).Trim()
+                if (-not [string]::IsNullOrEmpty($masterName)) { $params.MasterServer = $masterName }
+            }
+            catch { Write-Verbose -Message "Could not read the campaign master marker: $($_.Exception.Message)" }
+        }
+        # Content-database inventory: the local $spsUpdateDBsPath is relative to each server's
+        # script checkout, but the dashboard (and status store) is shared across the farm. Every
+        # renderer READS a campaign snapshot ('inventory.json') published once by the orchestrating
+        # master (see Publish-SPSInventorySnapshot); worker runs never replace it, so a worker's
+        # stale local copy cannot overwrite the master's authoritative inventory. Fall back to the
+        # local copy only for read-only rendering when no shared snapshot exists yet.
+        $sharedInventory = Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json'
+        if (Test-Path -Path $sharedInventory) { $params.ContentDbInventoryFile = $sharedInventory }
+        elseif (Test-Path -Path $spsUpdateDBsPath) { $params.ContentDbInventoryFile = $spsUpdateDBsPath }
+        # Tell the renderer whether content-database processing is actually planned. When both
+        # MountContentDatabase and UpgradeContentDatabase are disabled, the inventory is still shown
+        # but its databases must not be counted as pending work (they would keep the campaign below
+        # 100% forever).
+        $dbWorkEnabled = [bool]($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)
+        $params.ContentDbProcessingEnabled = $dbWorkEnabled
+        # Destination selection for a configured Dashboard.OutputPath:
+        #  - Shared UNC OutputPath: any server (master or worker) publishes to it, so a deferred
+        #    ConfirmReboot finishing after the master exits still updates the hosted copy.
+        #  - Master-local (drive-letter) OutputPath: only the recorded master writes it; every other
+        #    run renders to the campaign folder so a worker never scribbles to its own local copy and
+        #    leaves the shared dashboard stale (or fails when the local folder is not writable). The
+        #    master is unknown until Default seeds master.txt, so before that - e.g. a ProductUpdate
+        #    run - local output also defaults to the campaign folder. ResetStatus passes
+        #    -InitialPublish to seed the hosted copy once up front.
+        $outFile = $statusDashboardPath
+        if ($statusDashboardPath -ne $statusDashboardCampaignPath -and -not $statusDashboardOutputIsShared) {
+            $isMaster = $params.ContainsKey('MasterServer') -and ("$thisServer" -eq "$($params.MasterServer)")
+            if (-not $isMaster -and -not $InitialPublish) { $outFile = $statusDashboardCampaignPath }
+        }
+        $params.OutputFile = $outFile
         if ($Completed) { $params.Completed = $true }
         $null = Export-SPSUpdateProgressReport @params
     }
     catch {
         Write-Warning -Message "Failed to generate patching dashboard: $($_.Exception.Message)"
+    }
+}
+
+# Local helper: publish the master's ContentDatabase inventory as the single authoritative
+# campaign snapshot (inventory.json) in the shared status store. Only the orchestrating master
+# (Default run) calls this, so a worker's possibly stale local ContentDBs.json can never overwrite
+# it. Safe no-op when there is no local inventory or no campaign path.
+function Publish-SPSInventorySnapshot {
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
+    if (-not (Test-Path -Path $spsUpdateDBsPath)) { return }
+    try {
+        if (-not (Test-Path -Path $statusCampaignPath)) {
+            New-Item -Path $statusCampaignPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+        $snapshotPath = Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json'
+        try {
+            $inv = Get-Content -Path $spsUpdateDBsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+
+            # The ContentDatabase inventory is cached in the Config folder and reused across
+            # campaigns, so its baked-in UpgradeStatus can be stale (a flag from a previous campaign)
+            # or absent (older inventory generated before the field existed). Refresh the upgrade
+            # baseline from live SharePoint while preserving the saved database and sequence layout;
+            # databases that cannot be resolved live (for example not yet mounted) are marked
+            # 'Unknown' rather than silently 'healthy'.
+            $liveUpgrade = @{}
+            try {
+                foreach ($cdb in @(Get-SPContentDatabase -ErrorAction Stop)) {
+                    if ($null -ne $cdb -and -not [string]::IsNullOrEmpty("$($cdb.Name)")) {
+                        $liveUpgrade["$($cdb.Name)".ToLowerInvariant()] = if ($cdb.NeedsUpgrade) { 'Upgrade available' } else { 'No update pending' }
+                    }
+                }
+            }
+            catch {
+                Write-Verbose -Message "Could not read live content-database upgrade status: $($_.Exception.Message)"
+            }
+            # Always walk the inventory so a stale baseline is never kept: every database gets its
+            # live value, and any entry not resolved live (empty lookup, or not yet mounted) is
+            # marked 'Unknown' rather than left at a possibly stale 'healthy' value.
+            foreach ($prop in 'SPContentDatabase1', 'SPContentDatabase2', 'SPContentDatabase3', 'SPContentDatabase4') {
+                if ($inv.PSObject.Properties.Name -notcontains $prop) { continue }
+                foreach ($db in @($inv.$prop)) {
+                    if ($null -eq $db -or [string]::IsNullOrEmpty("$($db.Name)")) { continue }
+                    $key = "$($db.Name)".ToLowerInvariant()
+                    $val = if ($liveUpgrade.ContainsKey($key)) { $liveUpgrade[$key] } else { 'Unknown' }
+                    if ($db.PSObject.Properties.Name -contains 'UpgradeStatus') { $db.UpgradeStatus = $val }
+                    else { $db | Add-Member -NotePropertyName 'UpgradeStatus' -NotePropertyValue $val }
+                }
+            }
+            $inv | ConvertTo-Json -Depth 6 | Set-Content -Path $snapshotPath -Encoding UTF8 -ErrorAction Stop
+        }
+        catch {
+            # If the inventory cannot be parsed/refreshed, still publish it verbatim so renderers
+            # at least have the database/sequence layout.
+            Write-Verbose -Message "Publishing the inventory snapshot without an upgrade refresh: $($_.Exception.Message)"
+            Copy-Item -Path $spsUpdateDBsPath -Destination $snapshotPath -Force -ErrorAction Stop
+        }
+    }
+    catch {
+        Write-Verbose -Message "Could not publish the campaign inventory snapshot: $($_.Exception.Message)"
+    }
+}
+
+# Local helper: pre-fill the dashboard baseline for the whole farm at campaign start. On the
+# master, enumerate the farm servers and write a 'Pending' row per server for the Binaries and
+# Wizard cards, capturing each server's Role and SharePoint patch status plus the current farm
+# build - all from the master without remoting. Existing scopes (already Running/Done) keep their
+# state; only new scopes are seeded as Pending. SharePoint-only; safe no-op when SharePoint or the
+# status store is unavailable.
+function Initialize-SPSDashboardBaseline {
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
+    if (-not (Get-Command -Name Get-SPServer -ErrorAction SilentlyContinue)) { return }
+    try {
+        # Ensure the shared campaign folder exists before writing the master marker: on a fresh
+        # Default run with no prior ResetStatus/ProductUpdate the folder may not exist yet, and the
+        # marker write would otherwise fail before the baseline status writes create it.
+        if (-not (Test-Path -Path $statusCampaignPath)) {
+            try { New-Item -Path $statusCampaignPath -ItemType Directory -Force -ErrorAction Stop | Out-Null }
+            catch { Write-Verbose -Message "Could not create the campaign folder: $($_.Exception.Message)" }
+        }
+        # Persist the campaign master (this orchestrator) so every dashboard render tags it, even
+        # when a worker run regenerates the dashboard.
+        $masterMarker = Join-Path -Path $statusCampaignPath -ChildPath 'master.txt'
+        if (-not (Test-Path -Path $masterMarker)) {
+            try { Set-Content -Path $masterMarker -Value $thisServer -Encoding UTF8 -Force -ErrorAction Stop }
+            catch { Write-Verbose -Message "Could not persist the campaign master marker: $($_.Exception.Message)" }
+        }
+        $farmBuild = ''
+        try { $farmBuild = (Get-SPFarm).BuildVersion.ToString() } catch { $farmBuild = '' }
+        $farmServers = @(Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' })
+        foreach ($srv in $farmServers) {
+            $name = "$($srv.Name)"
+            $role = "$($srv.Role)"
+            $patch = ''
+            try { $patch = "$(Get-SPSServersPatchStatus -Server $name)" } catch { $patch = '' }
+            # 'NoActionRequired' (API) is shown with the exact Central Admin wording.
+            if ($patch -eq 'NoActionRequired') { $patch = 'No Action Required' }
+            foreach ($scope in @('ProductUpdate', 'Wizard')) {
+                # Seed-if-absent (race-safe inside the per-scope lock): creates the Pending baseline
+                # row when the scope does not exist, otherwise only enriches the farm metadata
+                # (Role/PatchStatus, and Build only when none is recorded) without ever overwriting a
+                # worker's state - even if the owning server's worker starts the scope concurrently.
+                Write-SPSStatus -Scope $scope -Phase $scope -Server $name -State 'Pending' -Role $role -Build $farmBuild -PatchStatus $patch -Detail 'Awaiting patching' -SeedIfAbsent
+            }
+        }
+        # Publish the master's inventory as the authoritative campaign snapshot for all renderers.
+        Publish-SPSInventorySnapshot
+        Write-SPSDashboard
+    }
+    catch {
+        Write-Warning -Message "Could not pre-fill the dashboard baseline: $($_.Exception.Message)"
     }
 }
 
@@ -699,6 +893,42 @@ switch ($Action) {
             else {
                 if (Test-Path -Path $statusCampaignPath) {
                     Write-Output "Resetting patching status store campaign: $statusCampaignPath"
+                    # Archive the previous dashboard(s) before clearing, so campaign history is kept.
+                    # Covers the IIS/OutputPath copy, the campaign-folder per-farm copy (in case the
+                    # OutputPath changed between campaigns) and the legacy '_dashboard.html' name, so
+                    # none is deleted without being archived first.
+                    $dashboardsToArchive = @()
+                    if (-not [string]::IsNullOrEmpty($statusDashboardPath)) { $dashboardsToArchive += $statusDashboardPath }
+                    if (-not [string]::IsNullOrEmpty($statusDashboardCampaignPath) -and ($dashboardsToArchive -notcontains $statusDashboardCampaignPath)) {
+                        $dashboardsToArchive += $statusDashboardCampaignPath
+                    }
+                    $legacyDashboard = Join-Path -Path $statusCampaignPath -ChildPath '_dashboard.html'
+                    if ($dashboardsToArchive -notcontains $legacyDashboard) { $dashboardsToArchive += $legacyDashboard }
+                    $archiveFailed = $false
+                    foreach ($dashToArchive in $dashboardsToArchive) {
+                        if ([string]::IsNullOrEmpty($dashToArchive) -or -not (Test-Path -Path $dashToArchive)) { continue }
+                        try {
+                            $historyFolder = Join-Path -Path $statusCampaignPath -ChildPath 'history'
+                            if (-not (Test-Path -Path $historyFolder)) {
+                                New-Item -Path $historyFolder -ItemType Directory -Force | Out-Null
+                            }
+                            $dashLeaf = [System.IO.Path]::GetFileNameWithoutExtension($dashToArchive)
+                            # Unique suffix so reports with the same leaf name from two locations (IIS
+                            # folder and campaign folder) cannot overwrite one another in history.
+                            $archiveName = '{0}_{1}_{2}.html' -f $dashLeaf, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'), ([guid]::NewGuid().ToString('N').Substring(0, 6))
+                            Move-Item -Path $dashToArchive -Destination (Join-Path -Path $historyFolder -ChildPath $archiveName) -Force -ErrorAction Stop
+                            Write-Output "Archived the previous dashboard to history\$archiveName"
+                        }
+                        catch {
+                            $archiveFailed = $true
+                            Write-Warning -Message "Could not archive the previous dashboard '$dashToArchive': $($_.Exception.Message)"
+                        }
+                    }
+                    # Abort the reset before any destructive cleanup if archiving failed, so the
+                    # previous report is preserved and the operator can retry instead of losing it.
+                    if ($archiveFailed) {
+                        throw "Aborting ResetStatus: the previous dashboard could not be archived. The status store was left untouched so the report is preserved; resolve the archive error and retry."
+                    }
                     Get-ChildItem -Path $statusCampaignPath -File -ErrorAction SilentlyContinue |
                         Remove-Item -Force -ErrorAction SilentlyContinue
                     Write-Output 'Status store campaign cleared.'
@@ -707,8 +937,22 @@ switch ($Action) {
                     Write-Output "Creating patching status store campaign: $statusCampaignPath"
                     New-Item -Path $statusCampaignPath -ItemType Directory -Force | Out-Null
                 }
-                # Generate the empty dashboard now so it is ready to open before patching.
-                Write-SPSDashboard
+                # Persist the orchestrator identity now (ResetStatus is run on the master/orchestrator)
+                # so later runs on this server - including ProductUpdate before Default seeds it - are
+                # recognised as the master and can update a drive-letter Dashboard.OutputPath instead
+                # of being redirected to the campaign folder. Written after the campaign cleanup above
+                # (which clears every file) and before the initial publish.
+                try {
+                    $resetMasterMarker = Join-Path -Path $statusCampaignPath -ChildPath 'master.txt'
+                    Set-Content -Path $resetMasterMarker -Value $thisServer -Encoding UTF8 -Force -ErrorAction Stop
+                }
+                catch {
+                    Write-Warning -Message "Could not persist the campaign master marker during ResetStatus: $($_.Exception.Message)"
+                }
+                # Generate the empty dashboard now so it is ready to open before patching. The
+                # operator runs ResetStatus on the orchestrator, so publish the initial hosted copy
+                # explicitly.
+                Write-SPSDashboard -InitialPublish
                 if (-not [string]::IsNullOrEmpty($statusDashboardPath)) {
                     Write-Output "Live dashboard ready (open it in a browser): $statusDashboardPath"
                 }
@@ -1110,7 +1354,9 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                 }
                 Write-SPSDashboard
             }
-            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed'
+            $puInstalledBuild = ''
+            try { $puInstalledBuild = (Get-SPSInstalledProductVersion).FileVersion.ToString() } catch { $puInstalledBuild = '' }
+            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
             Write-SPSDashboard
             # Optional automatic reboot (opt-in). No-op unless Reboot.Enable is set. When a
             # reboot is performed, this stops the transcript and restarts the server, so no
@@ -1250,6 +1496,9 @@ Exception: $_
                 exit
             }
             Write-Output "Update Script in progress | FULL Mode - Please Wait ..."
+            # Pre-fill the dashboard baseline for the whole farm (Pending rows per server with
+            # Role / current build / patch status) so the dashboard shows the full farm up front.
+            Initialize-SPSDashboardBaseline
             # Mount and/or Upgrade SPContentDatabase via parallel scheduled tasks.
             # The sequence tasks themselves decide what to do for each database based on
             # the MountContentDatabase and UpgradeContentDatabase flags in the config.

@@ -47,6 +47,18 @@
     # Possible values : '' or a UNC path, e.g. '\\fileserver\spsupdate-status'.
     StatusStorePath        = '\\fileserver\spsupdate-status'
 
+    # --- Dashboard (OPTIONAL block; controls where the live HTML dashboard is written) ----
+    Dashboard              = @{
+        # OutputPath : OPTIONAL existing folder (for example an IIS site folder) where the live
+        # dashboard HTML is written, so it can be served over HTTP like the SPSConfigKit pull-server
+        # dashboard. The file name is derived per farm (<App>-<Env>-<Farm>-dashboard.html), so
+        # several farms (INT / Preprod / PROD) can share one IIS folder without colliding.
+        # Leave empty/omit to write the dashboard into the status store campaign folder.
+        # SPSUpdate does not create the IIS site; create it once and point OutputPath at its folder.
+        # Possible values : '' or a local/UNC folder path, e.g. 'E:\inetpub\spsupdate'.
+        OutputPath = ''
+    }
+
     # --- Binaries (REQUIRED block; used by -Action ProductUpdate) ---------------------
     Binaries               = @{
         # ProductUpdate : allow the binary installation step.

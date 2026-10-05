@@ -62,6 +62,11 @@ Describe 'Environment config example (CONTOSO-PROD.example.psd1)' {
         $cfg.Execution.ContainsKey('InteractiveSequences') | Should -BeTrue
         $cfg.Execution.InteractiveSequences | Should -BeFalse
     }
+
+    It 'defines an optional Dashboard block with an OutputPath key' {
+        $cfg.Dashboard | Should -Not -BeNullOrEmpty
+        $cfg.Dashboard.ContainsKey('OutputPath') | Should -BeTrue
+    }
 }
 
 Describe 'Secrets example (secrets.example.psd1)' {

@@ -56,6 +56,24 @@
         .PARAMETER ExitCode
         Optional exit code recorded on the item.
 
+        .PARAMETER Build
+        Optional installed SharePoint product build for the server (dashboard metadata).
+
+        .PARAMETER PatchStatus
+        Optional SharePoint patch/upgrade status baseline for the server (for example
+        'No Action Required'), as returned by Get-SPSServersPatchStatus.
+
+        .PARAMETER Role
+        Optional farm role of the server (for example 'Application', 'WebFrontEnd', 'Search').
+
+        .PARAMETER SeedIfAbsent
+        Baseline/enrichment mode used by the master when pre-filling the dashboard. When the scope
+        does not exist yet it is created from the supplied metadata; when it already exists (a worker
+        owns it) only the farm metadata the master knows (Role, PatchStatus, and Build only when none
+        is recorded yet) is updated - the worker's State, Detail, Percent, CompletedAt and Items are
+        never overwritten. The absence check and the write happen inside the same per-scope lock as
+        every other writer, so a worker starting the scope concurrently is not clobbered.
+
         .EXAMPLE
         Set-SPSUpdateStatus -CampaignPath $c -Scope 'Sequence1' -Phase 'Upgrade' -State 'Running' -Item 'DB_A' -ItemState 'Done' -ItemDetail 'upgraded' -ExitCode 0
     #>
@@ -108,7 +126,23 @@
 
         [Parameter()]
         [System.Nullable[int]]
-        $ExitCode
+        $ExitCode,
+
+        [Parameter()]
+        [System.String]
+        $Build,
+
+        [Parameter()]
+        [System.String]
+        $PatchStatus,
+
+        [Parameter()]
+        [System.String]
+        $Role,
+
+        [Parameter()]
+        [switch]
+        $SeedIfAbsent
     )
 
     if (-not (Test-Path -Path $CampaignPath)) {
@@ -121,90 +155,180 @@
     $filePath = Join-Path -Path $CampaignPath -ChildPath $fileName
     $now = (Get-Date).ToString('o')
 
-    # Load the existing scope record (if any) so items accumulate across calls.
-    $record = $null
-    if (Test-Path -Path $filePath) {
+    # Acquire a best-effort cross-machine advisory lock on this scope so the read-modify-write is
+    # not interleaved with another writer of the SAME file (the master's baseline enrichment and the
+    # owning server's worker can both target e.g. APP2__ProductUpdate.json from different machines).
+    # A sibling '.lock' file created with CreateNew is atomic over SMB; if it cannot be taken within
+    # the retry budget (for example a stale lock from a crashed writer) we proceed anyway so the
+    # dashboard never deadlocks - the atomic temp-file move still prevents torn reads.
+    $lockPath = '{0}.lock' -f $filePath
+    $lockStream = $null
+    $lockAcquired = $false
+    $lockAttempts = 0
+    $lockStaleSeconds = 30
+    while (-not $lockAcquired -and $lockAttempts -lt 40) {
+        $lockAttempts++
         try {
-            $raw = Get-Content -Path $filePath -Raw -ErrorAction Stop
-            if (-not [string]::IsNullOrWhiteSpace($raw)) {
-                $record = $raw | ConvertFrom-Json -ErrorAction Stop
-            }
+            $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            $lockAcquired = $true
         }
         catch {
-            Write-Verbose -Message "Set-SPSUpdateStatus: could not read existing '$filePath', starting fresh: $($_.Exception.Message)"
-        }
-    }
-
-    if ($null -eq $record) {
-        $record = [PSCustomObject]@{
-            Server    = $Server
-            Scope     = $Scope
-            Phase     = $Phase
-            State     = 'Pending'
-            Detail    = ''
-            Percent   = $null
-            StartedAt = $now
-            UpdatedAt = $now
-            Items     = @()
-        }
-    }
-
-    $record.Server = $Server
-    $record.Scope = $Scope
-    $record.Phase = $Phase
-    $record.UpdatedAt = $now
-    if ($PSBoundParameters.ContainsKey('State')) { $record.State = $State }
-    if ($PSBoundParameters.ContainsKey('Detail')) { $record.Detail = $Detail }
-    if ($PSBoundParameters.ContainsKey('Percent')) { $record.Percent = $Percent }
-
-    # Upsert the optional item.
-    if ($PSBoundParameters.ContainsKey('Item') -and -not [string]::IsNullOrEmpty($Item)) {
-        $items = @($record.Items)
-        $existing = $items | Where-Object { $_.Name -eq $Item } | Select-Object -First 1
-        if ($null -eq $existing) {
-            $existing = [PSCustomObject]@{
-                Name      = $Item
-                State     = 'Pending'
-                Detail    = ''
-                ExitCode  = $null
-                UpdatedAt = $now
+            # Steal a stale lock left by a crashed writer (older than the stale threshold) so a dead
+            # process cannot block the store indefinitely.
+            try {
+                $lockInfo = Get-Item -Path $lockPath -ErrorAction Stop
+                if (((Get-Date) - $lockInfo.LastWriteTime).TotalSeconds -gt $lockStaleSeconds) {
+                    Remove-Item -Path $lockPath -Force -WhatIf:$false -Confirm:$false -ErrorAction SilentlyContinue
+                }
             }
-            $items += $existing
+            catch { Write-Verbose -Message "Set-SPSUpdateStatus: could not inspect the lock file: $($_.Exception.Message)" }
+            Start-Sleep -Milliseconds (40 + (Get-Random -Maximum 60))
         }
-        $existing.UpdatedAt = $now
-        if ($PSBoundParameters.ContainsKey('ItemState')) { $existing.State = $ItemState }
-        if ($PSBoundParameters.ContainsKey('ItemDetail')) { $existing.Detail = $ItemDetail }
-        if ($PSBoundParameters.ContainsKey('ExitCode')) { $existing.ExitCode = $ExitCode }
-        $record.Items = $items
     }
 
-    if (-not $PSCmdlet.ShouldProcess($filePath, 'Write SPSUpdate status')) {
+    # If the lock could not be taken, skip this best-effort status write rather than risk a lost
+    # update (reading a stale record under a still-held lock and overwriting a newer worker state).
+    # Atomic replacement prevents torn JSON, not lost updates - so when we cannot serialise we abort.
+    if (-not $lockAcquired) {
+        Write-Warning -Message "Set-SPSUpdateStatus: could not acquire the lock for '$filePath' after $lockAttempts attempts; skipping this status write to avoid a lost update."
         return $filePath
     }
 
-    $json = $record | ConvertTo-Json -Depth 6
-    $tmpPath = '{0}.tmp.{1}' -f $filePath, ([guid]::NewGuid().ToString('N'))
-    $encoding = New-Object System.Text.UTF8Encoding($false)
-
-    $attempts = 0
-    $written = $false
-    while (-not $written -and $attempts -lt 5) {
-        $attempts++
-        try {
-            [System.IO.File]::WriteAllText($tmpPath, $json, $encoding)
-            Move-Item -Path $tmpPath -Destination $filePath -Force -ErrorAction Stop
-            $written = $true
+    try {
+        # Load the existing scope record (if any) so items accumulate across calls.
+        $record = $null
+        if (Test-Path -Path $filePath) {
+            try {
+                $raw = Get-Content -Path $filePath -Raw -ErrorAction Stop
+                if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                    $record = $raw | ConvertFrom-Json -ErrorAction Stop
+                }
+            }
+            catch {
+                Write-Verbose -Message "Set-SPSUpdateStatus: could not read existing '$filePath', starting fresh: $($_.Exception.Message)"
+            }
         }
-        catch {
-            if (Test-Path -Path $tmpPath) { Remove-Item -Path $tmpPath -Force -ErrorAction SilentlyContinue }
-            if ($attempts -ge 5) {
-                Write-Warning -Message "Set-SPSUpdateStatus: failed to write '$filePath' after $attempts attempts: $($_.Exception.Message)"
+        $recordExisted = ($null -ne $record)
+
+        if ($null -eq $record) {
+            $record = [PSCustomObject]@{
+                Server      = $Server
+                Scope       = $Scope
+                Phase       = $Phase
+                State       = 'Pending'
+                Detail      = ''
+                Percent     = $null
+                Role        = ''
+                Build       = ''
+                PatchStatus = ''
+                StartedAt   = $now
+                UpdatedAt   = $now
+                CompletedAt = $null
+                Items       = @()
             }
-            else {
-                Start-Sleep -Milliseconds (150 * $attempts)
+        }
+
+        # Ensure fields added after a record was first written exist on records loaded from older
+        # JSON (ConvertFrom-Json only materializes the properties that were present on disk).
+        foreach ($prop in 'Role', 'Build', 'PatchStatus', 'CompletedAt') {
+            if (-not $record.PSObject.Properties[$prop]) {
+                $record | Add-Member -NotePropertyName $prop -NotePropertyValue $null
             }
+        }
+
+        $record.Server = $Server
+        $record.Scope = $Scope
+        $record.Phase = $Phase
+        $record.UpdatedAt = $now
+
+        if ($SeedIfAbsent -and $recordExisted) {
+            # Baseline enrichment of a worker-owned scope: update only the farm metadata the master
+            # knows and never the worker's lifecycle fields. Build is set only when none is recorded
+            # yet, preserving a worker's installed-CU build.
+            if ($PSBoundParameters.ContainsKey('Role')) { $record.Role = $Role }
+            if ($PSBoundParameters.ContainsKey('PatchStatus')) { $record.PatchStatus = $PatchStatus }
+            if ($PSBoundParameters.ContainsKey('Build') -and [string]::IsNullOrEmpty("$($record.Build)")) { $record.Build = $Build }
+        }
+        else {
+            if ($PSBoundParameters.ContainsKey('State')) { $record.State = $State }
+            if ($PSBoundParameters.ContainsKey('Detail')) { $record.Detail = $Detail }
+            if ($PSBoundParameters.ContainsKey('Percent')) { $record.Percent = $Percent }
+            if ($PSBoundParameters.ContainsKey('Role')) { $record.Role = $Role }
+            if ($PSBoundParameters.ContainsKey('Build')) { $record.Build = $Build }
+            if ($PSBoundParameters.ContainsKey('PatchStatus')) { $record.PatchStatus = $PatchStatus }
+            # Stamp the completion time the first time the scope reaches a terminal success state, and
+            # clear it if the scope is re-attempted (back to Pending/Running) so a later run does not
+            # show a stale completion date. Repeated terminal writes keep the original stamp.
+            if ($PSBoundParameters.ContainsKey('State')) {
+                if ($State -eq 'Done' -or $State -eq 'Skipped') {
+                    if ($null -eq $record.CompletedAt) { $record.CompletedAt = $now }
+                }
+                elseif ($State -eq 'Pending' -or $State -eq 'Running') {
+                    $record.CompletedAt = $null
+                }
+            }
+
+            # Upsert the optional item (not used by baseline enrichment of an existing scope).
+            if ($PSBoundParameters.ContainsKey('Item') -and -not [string]::IsNullOrEmpty($Item)) {
+                $items = @($record.Items)
+                $existing = $items | Where-Object { $_.Name -eq $Item } | Select-Object -First 1
+                if ($null -eq $existing) {
+                    $existing = [PSCustomObject]@{
+                        Name      = $Item
+                        State     = 'Pending'
+                        Detail    = ''
+                        ExitCode  = $null
+                        UpdatedAt = $now
+                    }
+                    $items += $existing
+                }
+                $existing.UpdatedAt = $now
+                if ($PSBoundParameters.ContainsKey('ItemState')) { $existing.State = $ItemState }
+                if ($PSBoundParameters.ContainsKey('ItemDetail')) { $existing.Detail = $ItemDetail }
+                if ($PSBoundParameters.ContainsKey('ExitCode')) { $existing.ExitCode = $ExitCode }
+                $record.Items = $items
+            }
+        }
+
+        if (-not $PSCmdlet.ShouldProcess($filePath, 'Write SPSUpdate status')) {
+            return $filePath
+        }
+
+        $json = $record | ConvertTo-Json -Depth 6
+        $tmpPath = '{0}.tmp.{1}' -f $filePath, ([guid]::NewGuid().ToString('N'))
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+
+        $attempts = 0
+        $written = $false
+        while (-not $written -and $attempts -lt 5) {
+            $attempts++
+            try {
+                [System.IO.File]::WriteAllText($tmpPath, $json, $encoding)
+                Move-Item -Path $tmpPath -Destination $filePath -Force -ErrorAction Stop
+                $written = $true
+            }
+            catch {
+                if (Test-Path -Path $tmpPath) { Remove-Item -Path $tmpPath -Force -ErrorAction SilentlyContinue }
+                if ($attempts -ge 5) {
+                    Write-Warning -Message "Set-SPSUpdateStatus: failed to write '$filePath' after $attempts attempts: $($_.Exception.Message)"
+                }
+                else {
+                    Start-Sleep -Milliseconds (150 * $attempts)
+                }
+            }
+        }
+
+        return $filePath
+    }
+    finally {
+        # Release the advisory lock (close the handle, then remove the sibling lock file).
+        if ($null -ne $lockStream) {
+            try { $lockStream.Close(); $lockStream.Dispose() } catch { Write-Verbose -Message "Set-SPSUpdateStatus: lock handle cleanup failed: $($_.Exception.Message)" }
+        }
+        if ($lockAcquired) {
+            # -WhatIf:$false so a -WhatIf invocation (which still physically created the lock via
+            # File.Open) does not leave an orphaned .lock file that would starve later real writes.
+            Remove-Item -Path $lockPath -Force -WhatIf:$false -Confirm:$false -ErrorAction SilentlyContinue
         }
     }
-
-    return $filePath
 }
