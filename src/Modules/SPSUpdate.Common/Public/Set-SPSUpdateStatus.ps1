@@ -56,6 +56,16 @@
         .PARAMETER ExitCode
         Optional exit code recorded on the item.
 
+        .PARAMETER Build
+        Optional installed SharePoint product build for the server (dashboard metadata).
+
+        .PARAMETER PatchStatus
+        Optional SharePoint patch/upgrade status baseline for the server (for example
+        'No Action Required'), as returned by Get-SPSServersPatchStatus.
+
+        .PARAMETER Role
+        Optional farm role of the server (for example 'Application', 'WebFrontEnd', 'Search').
+
         .EXAMPLE
         Set-SPSUpdateStatus -CampaignPath $c -Scope 'Sequence1' -Phase 'Upgrade' -State 'Running' -Item 'DB_A' -ItemState 'Done' -ItemDetail 'upgraded' -ExitCode 0
     #>
@@ -108,7 +118,19 @@
 
         [Parameter()]
         [System.Nullable[int]]
-        $ExitCode
+        $ExitCode,
+
+        [Parameter()]
+        [System.String]
+        $Build,
+
+        [Parameter()]
+        [System.String]
+        $PatchStatus,
+
+        [Parameter()]
+        [System.String]
+        $Role
     )
 
     if (-not (Test-Path -Path $CampaignPath)) {
@@ -137,15 +159,27 @@
 
     if ($null -eq $record) {
         $record = [PSCustomObject]@{
-            Server    = $Server
-            Scope     = $Scope
-            Phase     = $Phase
-            State     = 'Pending'
-            Detail    = ''
-            Percent   = $null
-            StartedAt = $now
-            UpdatedAt = $now
-            Items     = @()
+            Server      = $Server
+            Scope       = $Scope
+            Phase       = $Phase
+            State       = 'Pending'
+            Detail      = ''
+            Percent     = $null
+            Role        = ''
+            Build       = ''
+            PatchStatus = ''
+            StartedAt   = $now
+            UpdatedAt   = $now
+            CompletedAt = $null
+            Items       = @()
+        }
+    }
+
+    # Ensure fields added after a record was first written exist on records loaded from older
+    # JSON (ConvertFrom-Json only materializes the properties that were present on disk).
+    foreach ($prop in 'Role', 'Build', 'PatchStatus', 'CompletedAt') {
+        if (-not $record.PSObject.Properties[$prop]) {
+            $record | Add-Member -NotePropertyName $prop -NotePropertyValue $null
         }
     }
 
@@ -156,6 +190,13 @@
     if ($PSBoundParameters.ContainsKey('State')) { $record.State = $State }
     if ($PSBoundParameters.ContainsKey('Detail')) { $record.Detail = $Detail }
     if ($PSBoundParameters.ContainsKey('Percent')) { $record.Percent = $Percent }
+    if ($PSBoundParameters.ContainsKey('Role')) { $record.Role = $Role }
+    if ($PSBoundParameters.ContainsKey('Build')) { $record.Build = $Build }
+    if ($PSBoundParameters.ContainsKey('PatchStatus')) { $record.PatchStatus = $PatchStatus }
+    # Stamp the completion time once, the first time the scope reaches a terminal success state.
+    if ($PSBoundParameters.ContainsKey('State') -and ($State -eq 'Done' -or $State -eq 'Skipped') -and $null -eq $record.CompletedAt) {
+        $record.CompletedAt = $now
+    }
 
     # Upsert the optional item.
     if ($PSBoundParameters.ContainsKey('Item') -and -not [string]::IsNullOrEmpty($Item)) {
