@@ -157,6 +157,24 @@ Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {
         $h | Should -Match 'Pending <span class="n">2</span>'
         $h | Should -Match '>33%<'
     }
+
+    It 'reflects a failed scope whose only item is still Running (scope-level failure not hidden)' {
+        $camp = New-Campaign -Name 'rollup-failitem'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -State 'Failed' -Item 'DB1' -ItemState 'Running' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match 'Failed <span class="n">1</span>'
+        $h | Should -Match 'color:var\(--err\)'
+    }
+
+    It 'does not report 100% when a scope is still Running with all items Done' {
+        $camp = New-Campaign -Name 'rollup-runscope'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -State 'Running' -Item 'DB1' -ItemState 'Done' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Not -Match '>100%<'
+        $h | Should -Match 'Running <span class="n">1</span>'
+    }
 }
 
 Describe 'Export-SPSUpdateProgressReport (encoding)' {

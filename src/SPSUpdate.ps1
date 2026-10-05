@@ -356,7 +356,18 @@ function Write-SPSDashboard {
             }
             catch { Write-Verbose -Message "Could not read the campaign master marker: $($_.Exception.Message)" }
         }
-        if (Test-Path -Path $spsUpdateDBsPath) { $params.ContentDbInventoryFile = $spsUpdateDBsPath }
+        # Content-database inventory: the local $spsUpdateDBsPath is relative to each server's
+        # script checkout, but the dashboard (and status store) is shared across the farm. The
+        # master publishes its inventory as a campaign snapshot ('inventory.json' in the shared
+        # store) so worker runs (ProductUpdate / ConfirmReboot) that regenerate the dashboard still
+        # render the Content Databases card and count every database, even without a local copy.
+        $sharedInventory = Join-Path -Path $statusCampaignPath -ChildPath 'inventory.json'
+        if (Test-Path -Path $spsUpdateDBsPath) {
+            try { Copy-Item -Path $spsUpdateDBsPath -Destination $sharedInventory -Force -ErrorAction Stop }
+            catch { Write-Verbose -Message "Could not publish the campaign inventory snapshot: $($_.Exception.Message)" }
+        }
+        if (Test-Path -Path $sharedInventory) { $params.ContentDbInventoryFile = $sharedInventory }
+        elseif (Test-Path -Path $spsUpdateDBsPath) { $params.ContentDbInventoryFile = $spsUpdateDBsPath }
         if ($Completed) { $params.Completed = $true }
         $null = Export-SPSUpdateProgressReport @params
     }
@@ -375,6 +386,13 @@ function Initialize-SPSDashboardBaseline {
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     if (-not (Get-Command -Name Get-SPServer -ErrorAction SilentlyContinue)) { return }
     try {
+        # Ensure the shared campaign folder exists before writing the master marker: on a fresh
+        # Default run with no prior ResetStatus/ProductUpdate the folder may not exist yet, and the
+        # marker write would otherwise fail before the baseline status writes create it.
+        if (-not (Test-Path -Path $statusCampaignPath)) {
+            try { New-Item -Path $statusCampaignPath -ItemType Directory -Force -ErrorAction Stop | Out-Null }
+            catch { Write-Verbose -Message "Could not create the campaign folder: $($_.Exception.Message)" }
+        }
         # Persist the campaign master (this orchestrator) so every dashboard render tags it, even
         # when a worker run regenerates the dashboard.
         $masterMarker = Join-Path -Path $statusCampaignPath -ChildPath 'master.txt'
@@ -803,6 +821,7 @@ switch ($Action) {
                     if (-not [string]::IsNullOrEmpty($statusDashboardPath)) { $dashboardsToArchive += $statusDashboardPath }
                     $legacyDashboard = Join-Path -Path $statusCampaignPath -ChildPath '_dashboard.html'
                     if ($dashboardsToArchive -notcontains $legacyDashboard) { $dashboardsToArchive += $legacyDashboard }
+                    $archiveFailed = $false
                     foreach ($dashToArchive in $dashboardsToArchive) {
                         if ([string]::IsNullOrEmpty($dashToArchive) -or -not (Test-Path -Path $dashToArchive)) { continue }
                         try {
@@ -816,8 +835,14 @@ switch ($Action) {
                             Write-Output "Archived the previous dashboard to history\$archiveName"
                         }
                         catch {
-                            Write-Warning -Message "Could not archive the previous dashboard: $($_.Exception.Message)"
+                            $archiveFailed = $true
+                            Write-Warning -Message "Could not archive the previous dashboard '$dashToArchive': $($_.Exception.Message)"
                         }
+                    }
+                    # Abort the reset before any destructive cleanup if archiving failed, so the
+                    # previous report is preserved and the operator can retry instead of losing it.
+                    if ($archiveFailed) {
+                        throw "Aborting ResetStatus: the previous dashboard could not be archived. The status store was left untouched so the report is preserved; resolve the archive error and retry."
                     }
                     Get-ChildItem -Path $statusCampaignPath -File -ErrorAction SilentlyContinue |
                         Remove-Item -Force -ErrorAction SilentlyContinue

@@ -240,17 +240,31 @@
     # A scope with named items contributes one unit per item; otherwise the scope itself is one
     # unit. This covers the server cards (ProductUpdate/Wizard), the content-database items and
     # ALSO the Reboot / SideBySide / sequence-level scopes that have no card, so a failed campaign
-    # step can never be rolled up as green 100%.
+    # step can never be rolled up as green 100%. A scope-level Failed/Running state is tracked even
+    # when the scope has items (the exception handlers mark only the scope, not its items), so an
+    # all-Done item set under a Failed or still-Running scope never shows as green 100%.
     $units = @()
     $recordedDbNames = @{}
     foreach ($sc in $scopes) {
         $named = @($sc.Items | Where-Object { $_ -and "$($_.Name)" -ne '' })
         if ($named.Count -gt 0) {
+            $itemStates = @()
             foreach ($it in $named) {
+                $itemStates += "$($it.State)"
                 $units += "$($it.State)"
                 if ($sc.Phase -eq 'Mount' -or $sc.Phase -eq 'Upgrade' -or $sc.Phase -eq 'Sequence') {
                     $recordedDbNames["$($it.Name)".ToLowerInvariant()] = $true
                 }
+            }
+            # Reflect a scope-level state that the items do not already express, without
+            # double-counting completed leaf work.
+            $scState = "$($sc.State)"
+            if ($scState -eq 'Failed' -and ($itemStates -notcontains 'Failed')) {
+                $units += 'Failed'
+            }
+            elseif ($scState -eq 'Running' -and -not ($itemStates | Where-Object { $_ -eq 'Running' -or $_ -eq 'Pending' })) {
+                # Scope still running but every known item is terminal: keep it off 100%.
+                $units += 'Running'
             }
         }
         else {
