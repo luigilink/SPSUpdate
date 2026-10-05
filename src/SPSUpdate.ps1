@@ -221,6 +221,15 @@ function Get-SPSUpdateConfiguration {
         $config.StatusStorePath = ''
     }
 
+    # Dashboard.OutputPath (optional): an existing folder (for example an IIS site folder) where
+    # the live dashboard HTML is written instead of the campaign folder. Empty = campaign folder.
+    if (-not $config.ContainsKey('Dashboard') -or $null -eq $config.Dashboard) {
+        $config.Dashboard = @{}
+    }
+    if (-not $config.Dashboard.ContainsKey('OutputPath')) {
+        $config.Dashboard.OutputPath = ''
+    }
+
     return $config
 }
 
@@ -270,7 +279,22 @@ try {
 catch {
     Write-Warning -Message "Could not resolve the status store campaign path: $($_.Exception.Message)"
 }
-$statusDashboardPath = if ($null -ne $statusCampaignPath) { Join-Path -Path $statusCampaignPath -ChildPath '_dashboard.html' } else { $null }
+$statusDashboardPath = $null
+if ($null -ne $statusCampaignPath) {
+    # Dashboard file name is derived per farm (<App>-<Env>-<Farm>-dashboard.html) so several
+    # farms (INT / Preprod / PROD) can share one IIS folder without colliding.
+    $spsUpdateDashboardFile = "$($Application)-$($Environment)-$($spFarmName)-dashboard.html"
+    $dashboardOutputFolder = $statusCampaignPath
+    if (-not [string]::IsNullOrWhiteSpace($envCfg.Dashboard.OutputPath)) {
+        if (Test-Path -Path $envCfg.Dashboard.OutputPath) {
+            $dashboardOutputFolder = $envCfg.Dashboard.OutputPath
+        }
+        else {
+            Write-Warning -Message "Dashboard.OutputPath '$($envCfg.Dashboard.OutputPath)' does not exist; writing the dashboard to the campaign folder instead."
+        }
+    }
+    $statusDashboardPath = Join-Path -Path $dashboardOutputFolder -ChildPath $spsUpdateDashboardFile
+}
 
 # Local helper: best-effort status write. Never blocks the run on a status failure.
 function Write-SPSStatus {
@@ -284,7 +308,10 @@ function Write-SPSStatus {
         [System.String] $Item,
         [System.String] $ItemState,
         [System.String] $ItemDetail,
-        [System.Nullable[int]] $ExitCode
+        [System.Nullable[int]] $ExitCode,
+        [System.String] $Role,
+        [System.String] $Build,
+        [System.String] $PatchStatus
     )
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     try {
@@ -296,6 +323,9 @@ function Write-SPSStatus {
         if ($PSBoundParameters.ContainsKey('ItemState')) { $params.ItemState = $ItemState }
         if ($PSBoundParameters.ContainsKey('ItemDetail')) { $params.ItemDetail = $ItemDetail }
         if ($PSBoundParameters.ContainsKey('ExitCode') -and $null -ne $ExitCode) { $params.ExitCode = $ExitCode }
+        if ($PSBoundParameters.ContainsKey('Role')) { $params.Role = $Role }
+        if ($PSBoundParameters.ContainsKey('Build')) { $params.Build = $Build }
+        if ($PSBoundParameters.ContainsKey('PatchStatus')) { $params.PatchStatus = $PatchStatus }
         $null = Set-SPSUpdateStatus @params
     }
     catch {
@@ -314,12 +344,54 @@ function Write-SPSDashboard {
             EnvName      = $Environment
             AppCode      = $Application
             FarmName     = $spFarmName
+            MasterServer = $thisServer
         }
+        if (Test-Path -Path $spsUpdateDBsPath) { $params.ContentDbInventoryFile = $spsUpdateDBsPath }
         if ($Completed) { $params.Completed = $true }
         $null = Export-SPSUpdateProgressReport @params
     }
     catch {
         Write-Warning -Message "Failed to generate patching dashboard: $($_.Exception.Message)"
+    }
+}
+
+# Local helper: pre-fill the dashboard baseline for the whole farm at campaign start. On the
+# master, enumerate the farm servers and write a 'Pending' row per server for the Binaries and
+# Wizard cards, capturing each server's Role and SharePoint patch status plus the current farm
+# build - all from the master without remoting. Existing scopes (already Running/Done) keep their
+# state; only new scopes are seeded as Pending. SharePoint-only; safe no-op when SharePoint or the
+# status store is unavailable.
+function Initialize-SPSDashboardBaseline {
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
+    if (-not (Get-Command -Name Get-SPServer -ErrorAction SilentlyContinue)) { return }
+    try {
+        $farmBuild = ''
+        try { $farmBuild = (Get-SPFarm).BuildVersion.ToString() } catch { $farmBuild = '' }
+        $existing = @(Get-SPSUpdateStatus -CampaignPath $statusCampaignPath)
+        $farmServers = @(Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' })
+        foreach ($srv in $farmServers) {
+            $name = "$($srv.Name)"
+            $role = "$($srv.Role)"
+            $patch = ''
+            try { $patch = "$(Get-SPSServersPatchStatus -Server $name)" } catch { $patch = '' }
+            # 'NoActionRequired' (API) is shown with the exact Central Admin wording.
+            if ($patch -eq 'NoActionRequired') { $patch = 'No Action Required' }
+            foreach ($scope in @('ProductUpdate', 'Wizard')) {
+                $phase = $scope
+                $hasScope = @($existing | Where-Object { $_.Server -eq $name -and $_.Scope -eq $scope }).Count -gt 0
+                if ($hasScope) {
+                    # Refresh metadata only; never reset an in-progress state.
+                    Write-SPSStatus -Scope $scope -Phase $phase -Server $name -Role $role -Build $farmBuild -PatchStatus $patch
+                }
+                else {
+                    Write-SPSStatus -Scope $scope -Phase $phase -Server $name -State 'Pending' -Role $role -Build $farmBuild -PatchStatus $patch -Detail 'Awaiting patching'
+                }
+            }
+        }
+        Write-SPSDashboard
+    }
+    catch {
+        Write-Warning -Message "Could not pre-fill the dashboard baseline: $($_.Exception.Message)"
     }
 }
 
@@ -699,6 +771,22 @@ switch ($Action) {
             else {
                 if (Test-Path -Path $statusCampaignPath) {
                     Write-Output "Resetting patching status store campaign: $statusCampaignPath"
+                    # Archive the previous dashboard before clearing, so campaign history is kept.
+                    if (-not [string]::IsNullOrEmpty($statusDashboardPath) -and (Test-Path -Path $statusDashboardPath)) {
+                        try {
+                            $historyFolder = Join-Path -Path $statusCampaignPath -ChildPath 'history'
+                            if (-not (Test-Path -Path $historyFolder)) {
+                                New-Item -Path $historyFolder -ItemType Directory -Force | Out-Null
+                            }
+                            $dashLeaf = [System.IO.Path]::GetFileNameWithoutExtension($statusDashboardPath)
+                            $archiveName = '{0}_{1}.html' -f $dashLeaf, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss')
+                            Move-Item -Path $statusDashboardPath -Destination (Join-Path -Path $historyFolder -ChildPath $archiveName) -Force -ErrorAction Stop
+                            Write-Output "Archived the previous dashboard to history\$archiveName"
+                        }
+                        catch {
+                            Write-Warning -Message "Could not archive the previous dashboard: $($_.Exception.Message)"
+                        }
+                    }
                     Get-ChildItem -Path $statusCampaignPath -File -ErrorAction SilentlyContinue |
                         Remove-Item -Force -ErrorAction SilentlyContinue
                     Write-Output 'Status store campaign cleared.'
@@ -1110,7 +1198,9 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                 }
                 Write-SPSDashboard
             }
-            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed'
+            $puInstalledBuild = ''
+            try { $puInstalledBuild = (Get-SPSInstalledProductVersion).FileVersion.ToString() } catch { $puInstalledBuild = '' }
+            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
             Write-SPSDashboard
             # Optional automatic reboot (opt-in). No-op unless Reboot.Enable is set. When a
             # reboot is performed, this stops the transcript and restarts the server, so no
@@ -1250,6 +1340,9 @@ Exception: $_
                 exit
             }
             Write-Output "Update Script in progress | FULL Mode - Please Wait ..."
+            # Pre-fill the dashboard baseline for the whole farm (Pending rows per server with
+            # Role / current build / patch status) so the dashboard shows the full farm up front.
+            Initialize-SPSDashboardBaseline
             # Mount and/or Upgrade SPContentDatabase via parallel scheduled tasks.
             # The sequence tasks themselves decide what to do for each database based on
             # the MountContentDatabase and UpgradeContentDatabase flags in the config.
