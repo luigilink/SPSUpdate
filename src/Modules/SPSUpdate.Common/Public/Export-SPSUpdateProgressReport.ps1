@@ -53,6 +53,12 @@
         roll-up, so a campaign that legitimately skips database work can still reach 100%. Default
         $true.
 
+        .PARAMETER ContentDbUpgradeEnabled
+        Whether the campaign upgrades content databases (UpgradeContentDatabase). When $true, a
+        database marked Done has actually been upgraded, so its upgrade status is shown as up to
+        date regardless of the inventory baseline. When $false (a mount-only campaign), a Done
+        database was only mounted, not upgraded, so the override does not apply. Default $true.
+
         .PARAMETER RefreshSeconds
         Meta-refresh interval (seconds). 0 disables auto-refresh. Default 15.
 
@@ -110,6 +116,10 @@
         [Parameter()]
         [System.Boolean]
         $ContentDbProcessingEnabled = $true,
+
+        [Parameter()]
+        [System.Boolean]
+        $ContentDbUpgradeEnabled = $true,
 
         [Parameter()]
         [System.Int32]
@@ -248,10 +258,12 @@
                     # Skipped (this campaign does not mount/upgrade content databases).
                     $state = if ($ContentDbProcessingEnabled) { 'Pending' } else { 'Skipped' }
                 }
-                # Safety net: a database that SPSUpdate has already upgraded (State Done) is up to
-                # date, so show "No update pending" even if the inventory snapshot still carries an
-                # older "Upgrade available" baseline (closes the window before the next refresh).
-                if ($state -eq 'Done') { $upgradeStatus = 'No update pending' }
+                # Safety net: a database that SPSUpdate has actually UPGRADED (State Done while
+                # content-database upgrade is enabled) is up to date, so show "No update pending"
+                # even if the inventory snapshot still carries an older "Upgrade available" baseline.
+                # A mount-only campaign (upgrade disabled) marks a database Done after mounting
+                # WITHOUT upgrading it, so the override must not apply there.
+                if ($state -eq 'Done' -and $ContentDbUpgradeEnabled) { $upgradeStatus = 'No update pending' }
                 if ($state -eq 'Running') { $dbUpgrading++ }
                 $dbRows += '<tr>' +
                 "<td class=`"mono`">$(& $enc $db.Name)</td>" +
@@ -345,10 +357,10 @@
             foreach ($db in @($inventory.$prop)) {
                 if ($null -eq $db) { continue }
                 $us = if ($db.PSObject.Properties.Name -contains 'UpgradeStatus') { "$($db.UpgradeStatus)" } else { '' }
-                # A database SPSUpdate has already upgraded (State Done) is not a pending-upgrade
-                # anomaly even if the inventory baseline still says otherwise.
+                # A database SPSUpdate has actually upgraded (State Done while upgrade is enabled) is
+                # not a pending-upgrade anomaly even if the inventory baseline still says otherwise.
                 $dbState = $dbStateByName["$($db.Name)".ToLowerInvariant()]
-                if ("$dbState" -eq 'Done') { continue }
+                if ("$dbState" -eq 'Done' -and $ContentDbUpgradeEnabled) { continue }
                 # Count only a confirmed pending upgrade. 'Unknown' (a database that could not be
                 # resolved live, e.g. not yet mounted) is neither healthy nor a confirmed anomaly.
                 if (-not [string]::IsNullOrWhiteSpace($us) -and $us -ne 'No update pending' -and $us -ne 'Unknown') { $dbAnom++ }

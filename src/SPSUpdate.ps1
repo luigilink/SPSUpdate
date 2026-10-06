@@ -384,6 +384,10 @@ function Write-SPSDashboard {
         # 100% forever).
         $dbWorkEnabled = [bool]($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)
         $params.ContentDbProcessingEnabled = $dbWorkEnabled
+        # Whether content-database UPGRADE runs this campaign: only then does a Done database mean
+        # it was actually upgraded (so the renderer may show it as up to date). A mount-only run
+        # must not claim "No update pending" for a merely-mounted database.
+        $params.ContentDbUpgradeEnabled = [bool]$envCfg.UpgradeContentDatabase
         # Destination selection for a configured Dashboard.OutputPath:
         #  - Shared UNC OutputPath: any server (master or worker) publishes to it, so a deferred
         #    ConfirmReboot finishing after the master exits still updates the hosted copy.
@@ -490,13 +494,27 @@ function Write-SPSDashboardFarmStatus {
             try { $patch = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $name)" } catch { $patch = '' }
             foreach ($scope in @('ProductUpdate', 'Wizard')) {
                 # Seed-if-absent: creates the Pending baseline row for a new scope, otherwise refreshes
-                # only the farm metadata (Role/PatchStatus, Build when none) without touching a
-                # worker's State - so this is safe to call repeatedly during the campaign.
-                Write-SPSStatus -Scope $scope -Phase $scope -Server $name -State 'Pending' -Role $role -Build $farmBuild -PatchStatus $patch -Detail 'Awaiting patching' -SeedIfAbsent
+                # only the farm metadata (Role, PatchStatus when read, Build when none) without touching
+                # a worker's State - so this is safe to call repeatedly during the campaign.
+                $statusParams = @{
+                    Scope        = $scope
+                    Phase        = $scope
+                    Server       = $name
+                    State        = 'Pending'
+                    Role         = $role
+                    Build        = $farmBuild
+                    Detail       = 'Awaiting patching'
+                    SeedIfAbsent = $true
+                }
+                # Only overwrite the stored PatchStatus when the live lookup actually returned one;
+                # a transient failure must not erase the last known good value (nor silently clear
+                # the pre-patch anomaly banner).
+                if (-not [string]::IsNullOrWhiteSpace($patch)) { $statusParams.PatchStatus = $patch }
+                Write-SPSStatus @statusParams
             }
         }
         # Re-publish the inventory snapshot so the Content Databases card reflects the live upgrade
-        # status (Publish-SPSInventorySnapshot refreshes UpgradeStatus from GetUpgradeStatus).
+        # status (Publish-SPSInventorySnapshot refreshes each database from Get-SPContentDatabase.NeedsUpgrade).
         Publish-SPSInventorySnapshot
     }
     catch {

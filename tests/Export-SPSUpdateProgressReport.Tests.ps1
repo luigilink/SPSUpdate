@@ -164,6 +164,18 @@ Describe 'Export-SPSUpdateProgressReport (pre-patch anomaly)' {
         # And it no longer counts as a pending-upgrade anomaly.
         $h | Should -Not -Match 'database\(s\) with a pending upgrade'
     }
+
+    It 'does NOT mark a mount-only Done database as up to date (upgrade disabled)' {
+        $camp = New-Campaign -Name 'db-mount-only'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -PatchStatus 'No Action Required' -Confirm:$false | Out-Null
+        $inv = New-Inventory -Path (Join-Path $camp 'inv.json') -WithAnomaly
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Mount' -Server 'APP1' -Item 'WSS_Content_Portal' -ItemState 'Done' -Confirm:$false | Out-Null
+        # Mount-only: the database was mounted, not upgraded, so the baseline upgrade status stands.
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $inv -ContentDbUpgradeEnabled:$false
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match 'Upgrade required'
+        $h | Should -Match 'database\(s\) with a pending upgrade'
+    }
 }
 
 Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {
