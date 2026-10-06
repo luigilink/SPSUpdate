@@ -340,19 +340,35 @@ else {
     }
     else {
         Import-Module WebAdministration -ErrorAction SilentlyContinue
+        $pathNorm = "$Path".TrimEnd('\', '/')
         if ($iisBySite) {
             $existingSite = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
             if ($null -ne $existingSite) {
-                Write-Ok "IIS site '$SiteName' already exists."
+                # A pre-existing site with this name may serve a different folder or port; only
+                # accept it (and advertise the URL) when it actually points at $Path on $Port.
+                $sitePhys = "$($existingSite.physicalPath)".TrimEnd('\', '/')
+                $portMatch = @($existingSite.bindings.Collection | Where-Object { "$($_.bindingInformation)" -match "[:]$Port[:]" }).Count -gt 0
+                if ($sitePhys -ine $pathNorm) {
+                    Write-Warn "IIS site '$SiteName' already exists but serves '$($existingSite.physicalPath)' (expected '$Path'). Left unchanged - resolve the collision (use a different -SiteName) or point it at '$Path' manually."
+                }
+                elseif (-not $portMatch) {
+                    Write-Warn "IIS site '$SiteName' serves '$Path' but has no binding on port $Port. Review its bindings manually."
+                    $browseBase = "http://$($env:COMPUTERNAME):$Port"
+                }
+                else {
+                    Write-Ok "IIS site '$SiteName' already serves '$Path' on port $Port."
+                    $browseBase = "http://$($env:COMPUTERNAME):$Port"
+                }
             }
             elseif ($PSCmdlet.ShouldProcess("$SiteName (port $Port)", 'Create IIS site')) {
                 New-Website -Name $SiteName -PhysicalPath $Path -Port $Port -Force | Out-Null
                 Write-Ok "Created IIS site '$SiteName' on port $Port."
+                $browseBase = "http://$($env:COMPUTERNAME):$Port"
             }
             else {
                 Write-Info "[WhatIf] Would create IIS site '$SiteName' on port $Port."
+                $browseBase = "http://$($env:COMPUTERNAME):$Port"
             }
-            $browseBase = "http://$($env:COMPUTERNAME):$Port"
         }
         else {
             $parent = Get-Website -Name $ParentSite -ErrorAction SilentlyContinue
@@ -360,20 +376,30 @@ else {
                 Write-Fail "Parent IIS site '$ParentSite' does not exist. Create it first, or use -SiteName for a dedicated site."
             }
             else {
+                $binding = $parent.bindings.Collection | Select-Object -First 1
+                $scheme = if ($binding.protocol) { $binding.protocol } else { 'https' }
                 $existingApp = Get-WebApplication -Site $ParentSite -Name $AppAlias -ErrorAction SilentlyContinue
                 if ($null -ne $existingApp) {
-                    Write-Ok "Sub-application '/$AppAlias' already exists under '$ParentSite'."
+                    # A pre-existing sub-application with this alias may point elsewhere; only accept
+                    # it (and advertise the URL) when its physical path is $Path.
+                    $appPhys = "$($existingApp.PhysicalPath)".TrimEnd('\', '/')
+                    if ($appPhys -ine $pathNorm) {
+                        Write-Warn "Sub-application '/$AppAlias' already exists under '$ParentSite' but points to '$($existingApp.PhysicalPath)' (expected '$Path'). Left unchanged - resolve the collision (use a different -AppAlias) or re-point it at '$Path' manually."
+                    }
+                    else {
+                        Write-Ok "Sub-application '/$AppAlias' already serves '$Path' under '$ParentSite'."
+                        $browseBase = "$($scheme)://$ParentSite/$AppAlias"
+                    }
                 }
                 elseif ($PSCmdlet.ShouldProcess("$ParentSite/$AppAlias", 'Create IIS sub-application')) {
                     New-WebApplication -Site $ParentSite -Name $AppAlias -PhysicalPath $Path -Force | Out-Null
                     Write-Ok "Created sub-application '/$AppAlias' under '$ParentSite'."
+                    $browseBase = "$($scheme)://$ParentSite/$AppAlias"
                 }
                 else {
                     Write-Info "[WhatIf] Would create sub-application '/$AppAlias' under '$ParentSite'."
+                    $browseBase = "$($scheme)://$ParentSite/$AppAlias"
                 }
-                $binding = $parent.bindings.Collection | Select-Object -First 1
-                $scheme = if ($binding.protocol) { $binding.protocol } else { 'https' }
-                $browseBase = "$($scheme)://$ParentSite/$AppAlias"
             }
         }
     }
