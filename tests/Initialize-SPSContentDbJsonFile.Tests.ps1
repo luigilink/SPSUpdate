@@ -79,6 +79,36 @@ Describe 'Initialize-SPSContentDbJsonFile - with content databases' {
         $names | Should -Contain 'DB_Mid'
         $names | Should -Contain 'DB_Small'
     }
+
+    It 'persists a neutral Unknown upgrade status even when a database reports NeedsUpgrade' {
+        # The cached inventory is reused across campaigns, so it must never bake in a volatile
+        # upgrade flag: a stale value would be shown on a later ResetStatus "waiting" dashboard that
+        # cannot read SharePoint. The live status is resolved later by Publish-SPSInventorySnapshot.
+        function Get-SPContentDatabase {
+            [CmdletBinding()]
+            param()
+            @(
+                [pscustomobject]@{
+                    Name             = 'DB_NeedsUpgrade'
+                    Server           = 'SQL1'
+                    DiskSizeRequired = 500MB
+                    WebApplication   = [pscustomobject]@{ Url = 'https://portal' }
+                    NeedsUpgrade     = $true
+                }
+            )
+        }
+        . $script:funcPath
+
+        $path = Join-Path -Path $script:tmpDir -ChildPath 'app-PROD-CONTENT-ContentDBs.json'
+        Initialize-SPSContentDbJsonFile -Path $path 6> $null
+
+        $cfg = Get-Content -Path $path -Raw | ConvertFrom-Json
+        $db = foreach ($n in 1..4) {
+            $cfg."SPContentDatabase$n" | Where-Object { $_ -and $_.Name -eq 'DB_NeedsUpgrade' }
+        }
+        $db | Should -Not -BeNullOrEmpty
+        $db.UpgradeStatus | Should -Be 'Unknown'
+    }
 }
 
 Describe 'Initialize-SPSContentDbJsonFile - content database query failure' {

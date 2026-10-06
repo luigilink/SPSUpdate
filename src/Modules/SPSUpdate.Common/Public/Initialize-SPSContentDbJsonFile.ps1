@@ -69,10 +69,14 @@
                     WebAppUrl     = $spDatabase.WebApplication.Url;
                     SizeInBytes   = [System.Int64]$spDatabase.DiskSizeRequired;
                     SizeInMB      = [System.Math]::Round($spDatabase.DiskSizeRequired / 1MB, 0);
-                    # Pre-patch baseline shown on the dashboard. A healthy farm reports
-                    # 'No update pending'; 'Upgrade available' flags a database already needing
-                    # an upgrade before any CU is installed (surfaced as an informational anomaly).
-                    UpgradeStatus = if ($spDatabase.NeedsUpgrade) { 'Upgrade available' } else { 'No update pending' };
+                    # The upgrade status is volatile and this inventory is cached in the Config folder
+                    # and reused across campaigns, so a value baked in here would go stale (it would be
+                    # frozen at generation time - e.g. mid-upgrade - and then shown unchanged on a later
+                    # ResetStatus "waiting" dashboard that cannot read SharePoint). Persist a neutral
+                    # 'Unknown' instead; the authoritative live value is resolved on the Default baseline
+                    # by Publish-SPSInventorySnapshot (Get-SPContentDatabase.NeedsUpgrade). 'Unknown' is
+                    # excluded from the dashboard inconsistency banner, so it never raises a false alarm.
+                    UpgradeStatus = 'Unknown';
                 })
             $sequenceLoad[$minIndex] += $spDatabase.DiskSizeRequired
         }
