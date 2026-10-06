@@ -1708,6 +1708,15 @@ Exception: $_
                 Write-Output 'No content database on this farm (for example a dedicated search farm); skipping the mount/upgrade sequences.'
             }
 
+            # Reset every farm server's Wizard scope to Pending at the start of this run's wizard
+            # phase, so a stale terminal state from a previous Default run (when no ResetStatus was
+            # run in between) does not linger as the master processes servers one by one. Each
+            # server's real outcome is written as the wizard reaches it below.
+            foreach ($wizServer in @(Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' })) {
+                Write-SPSStatus -Scope 'Wizard' -Phase 'Wizard' -Server "$($wizServer.Name)" -State 'Pending' -Detail 'Awaiting Configuration Wizard'
+            }
+            Write-SPSDashboard
+
             # Run Configuration Wizard on Master SharePoint Server
             try {
                 # Get patch status on Master SharePoint Server
