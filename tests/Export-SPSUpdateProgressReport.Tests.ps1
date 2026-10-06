@@ -149,6 +149,21 @@ Describe 'Export-SPSUpdateProgressReport (pre-patch anomaly)' {
         $h | Should -Not -Match 'Pre-patch inconsistency detected'
         $h | Should -Match 'Unknown'
     }
+
+    It 'shows an upgraded database (State Done) as up to date and raises no DB anomaly' {
+        $camp = New-Campaign -Name 'db-done'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -PatchStatus 'No Action Required' -Confirm:$false | Out-Null
+        # The DB's inventory baseline still says "Upgrade required", but SPSUpdate has upgraded it.
+        $inv = New-Inventory -Path (Join-Path $camp 'inv.json') -WithAnomaly
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -Item 'WSS_Content_Portal' -ItemState 'Done' -ExitCode 0 -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $inv
+        $h = Get-Content -Path $out -Raw
+        # The Content DB row for the done database shows No update pending, not the stale baseline.
+        $h | Should -Match 'WSS_Content_Portal'
+        $h | Should -Not -Match 'Upgrade required'
+        # And it no longer counts as a pending-upgrade anomaly.
+        $h | Should -Not -Match 'database\(s\) with a pending upgrade'
+    }
 }
 
 Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {

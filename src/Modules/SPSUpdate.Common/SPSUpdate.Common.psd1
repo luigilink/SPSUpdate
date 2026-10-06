@@ -12,6 +12,8 @@
     FunctionsToExport = @(
         'Add-SPSScheduledTask'
         'Add-SPSUpdateEvent'
+        'ConvertTo-SPSPatchStatusLabel'
+        'ConvertTo-SPSRoleLabel'
         'Copy-SPSSideBySideFilesRemote'
         'Export-SPSUpdateDbReport'
         'Export-SPSUpdateProgressReport'

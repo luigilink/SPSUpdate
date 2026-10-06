@@ -248,6 +248,10 @@
                     # Skipped (this campaign does not mount/upgrade content databases).
                     $state = if ($ContentDbProcessingEnabled) { 'Pending' } else { 'Skipped' }
                 }
+                # Safety net: a database that SPSUpdate has already upgraded (State Done) is up to
+                # date, so show "No update pending" even if the inventory snapshot still carries an
+                # older "Upgrade available" baseline (closes the window before the next refresh).
+                if ($state -eq 'Done') { $upgradeStatus = 'No update pending' }
                 if ($state -eq 'Running') { $dbUpgrading++ }
                 $dbRows += '<tr>' +
                 "<td class=`"mono`">$(& $enc $db.Name)</td>" +
@@ -341,6 +345,10 @@
             foreach ($db in @($inventory.$prop)) {
                 if ($null -eq $db) { continue }
                 $us = if ($db.PSObject.Properties.Name -contains 'UpgradeStatus') { "$($db.UpgradeStatus)" } else { '' }
+                # A database SPSUpdate has already upgraded (State Done) is not a pending-upgrade
+                # anomaly even if the inventory baseline still says otherwise.
+                $dbState = $dbStateByName["$($db.Name)".ToLowerInvariant()]
+                if ("$dbState" -eq 'Done') { continue }
                 # Count only a confirmed pending upgrade. 'Unknown' (a database that could not be
                 # resolved live, e.g. not yet mounted) is neither healthy nor a confirmed anomaly.
                 if (-not [string]::IsNullOrWhiteSpace($us) -and $us -ne 'No update pending' -and $us -ne 'Unknown') { $dbAnom++ }
