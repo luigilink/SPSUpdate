@@ -8,7 +8,9 @@
     and exposes the required keys, the service credential exists in secrets.psd1
     and decrypts under the current account (DPAPI), the session is elevated, the
     status store (UNC share, v4.2.0+) is writable, and each farm server is
-    reachable for CredSSP remoting.
+    reachable for CredSSP remoting. When the optional Dashboard.OutputPath is set,
+    it also checks that folder exists and is writable, and warns when it is a
+    master-local (drive-letter) path rather than a shared UNC path.
 
     Read-only: it never changes configuration, credentials or the farm. The only
     side effect is a temporary probe file written and immediately deleted in the
@@ -256,6 +258,41 @@ if ($null -ne $cfg -and $cfg.Contains('StatusStorePath') -and -not [string]::IsN
 }
 else {
     Add-CheckResult -Section 'StatusStore' -Name 'StatusStorePath' -Status 'WARN' -Detail 'Not set; the live dashboard will use the local Results\status folder and will not capture ProductUpdate on other servers'
+}
+
+# 5b. Dashboard hosting (optional Dashboard.OutputPath)
+Write-Section -Title 'Dashboard'
+$dashOutputPath = $null
+if ($null -ne $cfg -and $cfg.Contains('Dashboard') -and $null -ne $cfg.Dashboard) {
+    try { $dashOutputPath = [string]$cfg.Dashboard.OutputPath } catch { $dashOutputPath = $null }
+}
+if ([string]::IsNullOrWhiteSpace($dashOutputPath)) {
+    Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath' -Status 'SKIP' -Detail 'Not set; the dashboard is written into the status store campaign folder'
+}
+else {
+    # A shared UNC path (\\server\share\...) lets every farm server publish the hosted copy; a
+    # drive-letter path is master-local, so worker runs cannot update it (see the IIS hosting wiki).
+    $isUnc = $dashOutputPath.StartsWith('\\') -or $dashOutputPath.StartsWith('//')
+    if ($isUnc) {
+        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath is shared (UNC)' -Status 'PASS' -Detail $dashOutputPath
+    }
+    else {
+        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath is shared (UNC)' -Status 'WARN' -Detail "'$dashOutputPath' is a local path, writable only by the master; worker runs (distributed ProductUpdate, ConfirmReboot) cannot update the hosted dashboard. Prefer a shared UNC path served by IIS (see the Hosting the dashboard on IIS wiki)."
+    }
+    if (-not (Test-Path -Path $dashOutputPath)) {
+        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath exists' -Status 'FAIL' -Detail "Folder not found: $dashOutputPath. SPSUpdate does not create it; provision it first (see New-SPSDashboardSite.ps1)."
+    }
+    else {
+        $dashProbe = Join-Path -Path $dashOutputPath -ChildPath (".spsupdate-readiness-{0}.tmp" -f ([guid]::NewGuid().ToString('N')))
+        try {
+            Set-Content -Path $dashProbe -Value 'readiness' -ErrorAction Stop
+            Remove-Item -Path $dashProbe -Force -ErrorAction SilentlyContinue
+            Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (current user)' -Status 'PASS' -Detail $dashOutputPath
+        }
+        catch {
+            Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (current user)' -Status 'FAIL' -Detail "Cannot write to $dashOutputPath : $($_.Exception.Message)"
+        }
+    }
 }
 
 # 6. Network / CredSSP reachability
