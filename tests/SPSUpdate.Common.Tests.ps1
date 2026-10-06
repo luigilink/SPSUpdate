@@ -44,6 +44,8 @@ Describe 'SPSUpdate.Common module' {
         $expected = @(
             'Add-SPSScheduledTask'
             'Add-SPSUpdateEvent'
+            'ConvertTo-SPSPatchStatusLabel'
+            'ConvertTo-SPSRoleLabel'
             'Copy-SPSSideBySideFilesRemote'
             'Export-SPSUpdateDbReport'
             'Export-SPSUpdateProgressReport'

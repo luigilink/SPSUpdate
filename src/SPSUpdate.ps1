@@ -384,6 +384,10 @@ function Write-SPSDashboard {
         # 100% forever).
         $dbWorkEnabled = [bool]($envCfg.UpgradeContentDatabase -or $envCfg.MountContentDatabase)
         $params.ContentDbProcessingEnabled = $dbWorkEnabled
+        # Whether content-database UPGRADE runs this campaign: only then does a Done database mean
+        # it was actually upgraded (so the renderer may show it as up to date). A mount-only run
+        # must not claim "No update pending" for a merely-mounted database.
+        $params.ContentDbUpgradeEnabled = [bool]$envCfg.UpgradeContentDatabase
         # Destination selection for a configured Dashboard.OutputPath:
         #  - Shared UNC OutputPath: any server (master or worker) publishes to it, so a deferred
         #    ConfirmReboot finishing after the master exits still updates the hosted copy.
@@ -466,6 +470,59 @@ function Publish-SPSInventorySnapshot {
     }
 }
 
+# Local helper: refresh the live farm status on the dashboard (master-side). Re-reads each farm
+# server's patch status and role from SharePoint, maps them to short readable labels, refreshes the
+# PatchStatus/Role metadata (never the worker State) and re-publishes the content-database inventory
+# snapshot with fresh upgrade status. Called at key transitions (baseline, after the wizard, final
+# render) so a successful campaign no longer shows a stale "Upgrade Required"/anomaly. SharePoint-
+# only; when SharePoint is unavailable it simply renders whatever is already in the store.
+function Write-SPSDashboardFarmStatus {
+    param([switch] $Completed)
+    if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
+    if (-not (Get-Command -Name Get-SPServer -ErrorAction SilentlyContinue)) {
+        Write-SPSDashboard -Completed:$Completed
+        return
+    }
+    try {
+        $farmBuild = ''
+        try { $farmBuild = (Get-SPFarm).BuildVersion.ToString() } catch { $farmBuild = '' }
+        $farmServers = @(Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' })
+        foreach ($srv in $farmServers) {
+            $name = "$($srv.Name)"
+            $role = ConvertTo-SPSRoleLabel -Role "$($srv.Role)"
+            $patch = ''
+            try { $patch = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $name)" } catch { $patch = '' }
+            foreach ($scope in @('ProductUpdate', 'Wizard')) {
+                # Seed-if-absent: creates the Pending baseline row for a new scope, otherwise refreshes
+                # only the farm metadata (Role, PatchStatus when read, Build when none) without touching
+                # a worker's State - so this is safe to call repeatedly during the campaign.
+                $statusParams = @{
+                    Scope        = $scope
+                    Phase        = $scope
+                    Server       = $name
+                    State        = 'Pending'
+                    Role         = $role
+                    Build        = $farmBuild
+                    Detail       = 'Awaiting patching'
+                    SeedIfAbsent = $true
+                }
+                # Only overwrite the stored PatchStatus when the live lookup actually returned one;
+                # a transient failure must not erase the last known good value (nor silently clear
+                # the pre-patch anomaly banner).
+                if (-not [string]::IsNullOrWhiteSpace($patch)) { $statusParams.PatchStatus = $patch }
+                Write-SPSStatus @statusParams
+            }
+        }
+        # Re-publish the inventory snapshot so the Content Databases card reflects the live upgrade
+        # status (Publish-SPSInventorySnapshot refreshes each database from Get-SPContentDatabase.NeedsUpgrade).
+        Publish-SPSInventorySnapshot
+    }
+    catch {
+        Write-Warning -Message "Could not refresh the dashboard farm status: $($_.Exception.Message)"
+    }
+    Write-SPSDashboard -Completed:$Completed
+}
+
 # Local helper: pre-fill the dashboard baseline for the whole farm at campaign start. On the
 # master, enumerate the farm servers and write a 'Pending' row per server for the Binaries and
 # Wizard cards, capturing each server's Role and SharePoint patch status plus the current farm
@@ -490,27 +547,8 @@ function Initialize-SPSDashboardBaseline {
             try { Set-Content -Path $masterMarker -Value $thisServer -Encoding UTF8 -Force -ErrorAction Stop }
             catch { Write-Verbose -Message "Could not persist the campaign master marker: $($_.Exception.Message)" }
         }
-        $farmBuild = ''
-        try { $farmBuild = (Get-SPFarm).BuildVersion.ToString() } catch { $farmBuild = '' }
-        $farmServers = @(Get-SPServer | Where-Object -FilterScript { $_.Role -ne 'Invalid' })
-        foreach ($srv in $farmServers) {
-            $name = "$($srv.Name)"
-            $role = "$($srv.Role)"
-            $patch = ''
-            try { $patch = "$(Get-SPSServersPatchStatus -Server $name)" } catch { $patch = '' }
-            # 'NoActionRequired' (API) is shown with the exact Central Admin wording.
-            if ($patch -eq 'NoActionRequired') { $patch = 'No Action Required' }
-            foreach ($scope in @('ProductUpdate', 'Wizard')) {
-                # Seed-if-absent (race-safe inside the per-scope lock): creates the Pending baseline
-                # row when the scope does not exist, otherwise only enriches the farm metadata
-                # (Role/PatchStatus, and Build only when none is recorded) without ever overwriting a
-                # worker's state - even if the owning server's worker starts the scope concurrently.
-                Write-SPSStatus -Scope $scope -Phase $scope -Server $name -State 'Pending' -Role $role -Build $farmBuild -PatchStatus $patch -Detail 'Awaiting patching' -SeedIfAbsent
-            }
-        }
-        # Publish the master's inventory as the authoritative campaign snapshot for all renderers.
-        Publish-SPSInventorySnapshot
-        Write-SPSDashboard
+        # Seed the per-server baseline rows and publish the first snapshot + dashboard.
+        Write-SPSDashboardFarmStatus
     }
     catch {
         Write-Warning -Message "Could not pre-fill the dashboard baseline: $($_.Exception.Message)"
@@ -1725,6 +1763,11 @@ Exception: $_
                 }
             }
 
+            # The Configuration Wizard has run on every server: refresh the live farm status so the
+            # Patch Status column flips to No Action Required and the pre-patch banner clears before
+            # the (optional) side-by-side step and the final render.
+            Write-SPSDashboardFarmStatus
+
             # Enable SideBySideToken and run Copy-SPSideBySideFiles on master server
             if (-not([string]::IsNullOrEmpty($envCfg.SideBySideToken.BuildVersion))) {
                 try {
@@ -1773,8 +1816,9 @@ Exception: $_
                 }
             }
 
-            # Final dashboard render: mark the campaign completed (auto-refresh off).
-            Write-SPSDashboard -Completed
+            # Final dashboard render: refresh the live farm status (so a successful campaign shows
+            # No Action Required and the pre-patch banner clears) and mark the campaign completed.
+            Write-SPSDashboardFarmStatus -Completed
         }
     }
 }
