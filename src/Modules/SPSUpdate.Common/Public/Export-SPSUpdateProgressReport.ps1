@@ -373,7 +373,7 @@
         if (@($svrAnom).Count -gt 0) { $parts += "$(@($svrAnom).Count) server(s) not reporting 'No Action Required'" }
         if ($dbAnom -gt 0) { $parts += "$dbAnom database(s) with a pending upgrade" }
         $alertHtml = '<div class="alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>' +
-        "<div><strong>Pre-patch inconsistency detected.</strong> $(& $enc ($parts -join '; ')) before any update was applied. Review the farm state in Central Administration; this is informational and does not block the run.</div></div>"
+        "<div><strong>Farm inconsistency detected.</strong> $(& $enc ($parts -join '; ')). Review the farm state in Central Administration; this is informational and does not block the run.</div></div>"
     }
 
     # ---- Header metadata ----------------------------------------------------------

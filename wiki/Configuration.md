@@ -219,11 +219,15 @@ The near real-time dashboard is organised as three cards:
   sequence, upgrade status (`No update pending` when up to date) and processing state.
 
 At the start of the master `Default` run the farm is enumerated with `Get-SPServer` and a
-baseline row is pre-filled per server, so the whole farm is visible up front. Because a healthy
-farm reports `No Action Required` (servers) and `No update pending` (databases) before a CU is
-installed, a server or database that is **not** in that state is highlighted as an informational
-**pre-patch inconsistency** banner — a quick health check before patching. The card wording
-matches the Central Administration pages exactly.
+baseline row is pre-filled per server, so the whole farm is visible up front. The live farm
+status (each server's patch status and the content-database upgrade status) is then **refreshed
+at key transitions** — the pre-patch baseline, after the Configuration Wizard completes, and the
+final render — so a successful campaign ends with the servers back to `No Action Required` and no
+lingering warning. A server or database that is **not** reporting a healthy state is highlighted
+as an informational **farm inconsistency** banner (a quick health check); it clears automatically
+once the farm is healthy again. Patch status and server role are shown with short, readable
+labels (for example `Upgrade Required`, `Application with Search`) derived from the Central
+Administration values.
 
 ```powershell
 Dashboard = @{

@@ -122,7 +122,7 @@ Describe 'Export-SPSUpdateProgressReport (pre-patch anomaly)' {
         Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Pending' -PatchStatus 'Upgrade Required' -Confirm:$false | Out-Null
         $out = Export-SPSUpdateProgressReport -CampaignPath $camp
         $h = Get-Content -Path $out -Raw
-        $h | Should -Match 'Pre-patch inconsistency detected'
+        $h | Should -Match 'Farm inconsistency detected'
         $h | Should -Match 'not reporting'
     }
 
@@ -146,7 +146,7 @@ Describe 'Export-SPSUpdateProgressReport (pre-patch anomaly)' {
         } | ConvertTo-Json -Depth 6 | Set-Content -Path $invPath -Encoding UTF8
         $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $invPath
         $h = Get-Content -Path $out -Raw
-        $h | Should -Not -Match 'Pre-patch inconsistency detected'
+        $h | Should -Not -Match 'Farm inconsistency detected'
         $h | Should -Match 'Unknown'
     }
 
