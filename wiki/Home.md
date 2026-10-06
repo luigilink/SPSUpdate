@@ -3,6 +3,8 @@
 **SPSUpdate** is a PowerShell tool that installs SharePoint Server cumulative updates and runs the post-setup Configuration Wizard (PSConfig) across a farm. It requires only PowerShell 5.1 or later — there is no DSC dependency.
 
 > **Two supported lines, same feature set.** The **`5.x`** line targets **SharePoint Server Subscription Edition** only. The **`4.x`** line keeps compatibility with **SharePoint Server 2016 and 2019** (loading the legacy `Microsoft.SharePoint.PowerShell` snap-in) in addition to Subscription Edition. The product version is detected automatically at runtime — no configuration change is needed. Use the line that matches your farm.
+>
+> ⚠️ SharePoint Server 2016 and 2019 reached **Microsoft end of support on 14 July 2026** and no longer receive security updates. The `4.x` line provides SPSUpdate **tooling compatibility** only; it does **not** restore vendor support or security patches. Plan a migration to Subscription Edition.
 
 SPSUpdate installs the update binaries, mounts and/or upgrades content databases in parallel via scheduled tasks, runs PSConfig on the local and remote servers over **CredSSP remoting**, and configures the side-by-side patching token for zero-downtime upgrades.
 

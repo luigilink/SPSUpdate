@@ -53,6 +53,26 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
         $sharePointVersion = 'SE'
     }
 
+    # Guard against patching a farm with a CU for a different product line (for example a 2019 CU on
+    # a Subscription Edition server). Classify the installed version the same way and fail before any
+    # service is stopped or an incompatible installer is launched when the lines do not match.
+    $installedProductVersion = Get-SPSInstalledProductVersion
+    if ($installedProductVersion.ProductBuildPart.ToString().Length -eq 4) {
+        $installedSharePointVersion = '2016'
+    }
+    elseif ($installedProductVersion.ProductBuildPart -lt 13000) {
+        $installedSharePointVersion = '2019'
+    }
+    else {
+        $installedSharePointVersion = 'SE'
+    }
+    if ($sharePointVersion -ne $installedSharePointVersion) {
+        throw ("The update package targets SharePoint $sharePointVersion (build $($fileVersionInfo)) " +
+            "but this server runs SharePoint $installedSharePointVersion (version " +
+            "$($installedProductVersion.FileVersion)). Use a cumulative update that matches the " +
+            "installed product line.")
+    }
+
     Write-Verbose -Message "Update is a Cumulative Update."
     # Cumulative update package (SharePoint 2016 / 2019 / Subscription Edition).
     $setupFileInformation = New-Object -TypeName System.IO.FileInfo -ArgumentList  $SetupFile

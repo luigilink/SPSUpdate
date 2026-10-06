@@ -12,6 +12,10 @@ SharePoint environment.
 > which keeps compatibility with SharePoint Server 2016 and 2019 (loading the legacy
 > `Microsoft.SharePoint.PowerShell` snap-in) in addition to Subscription Edition. If you run
 > **only** Subscription Edition, use the `5.x` line instead.
+>
+> ⚠️ SharePoint Server 2016 and 2019 reached **Microsoft end of support on 14 July 2026** and no
+> longer receive security updates. This line restores SPSUpdate **tooling compatibility** with those
+> versions; it does **not** restore vendor support. Plan a migration to Subscription Edition.
 
 ## 📦 Prerequisites
 
