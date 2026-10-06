@@ -154,6 +154,20 @@ function Write-Info { param([System.String] $Message) Write-Host "[INFO]  $Messa
 function Write-Warn { param([System.String] $Message) Write-Host "[WARN]  $Message" -ForegroundColor Yellow }
 function Write-Fail { param([System.String] $Message) Write-Host "[FAIL]  $Message" -ForegroundColor Red }
 
+# Build a browse base URL (proto://host[:port]) from an IIS binding object, honoring the real
+# protocol, host header and port (an existing binding may be HTTPS and/or carry a host header, so
+# a hard-coded http://<computer>:<port> would be wrong).
+function Get-BrowseBaseFromBinding {
+    param($Binding)
+    $proto = if ($Binding.protocol) { "$($Binding.protocol)" } else { 'http' }
+    $parts = "$($Binding.bindingInformation)" -split ':'
+    $port = if ($parts.Count -ge 2 -and -not [string]::IsNullOrWhiteSpace($parts[1])) { $parts[1] } elseif ($proto -eq 'https') { '443' } else { '80' }
+    $hostName = if ($parts.Count -ge 3 -and -not [string]::IsNullOrWhiteSpace($parts[2])) { $parts[2] } else { $env:COMPUTERNAME }
+    $isDefaultPort = ($proto -eq 'http' -and $port -eq '80') -or ($proto -eq 'https' -and $port -eq '443')
+    if ($isDefaultPort) { return "$proto`://$hostName" }
+    return "$proto`://$hostName`:$port"
+}
+
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ' SPSUpdate - Dashboard IIS hosting setup' -ForegroundColor Cyan
@@ -345,19 +359,21 @@ else {
             $existingSite = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
             if ($null -ne $existingSite) {
                 # A pre-existing site with this name may serve a different folder or port; only
-                # accept it (and advertise the URL) when it actually points at $Path on $Port.
+                # accept it (and advertise the URL) when it actually points at $Path. Build the URL
+                # from the real matching binding (protocol/host/port), not a hard-coded http://.
                 $sitePhys = "$($existingSite.physicalPath)".TrimEnd('\', '/')
-                $portMatch = @($existingSite.bindings.Collection | Where-Object { "$($_.bindingInformation)" -match "[:]$Port[:]" }).Count -gt 0
+                $matchBinding = $existingSite.bindings.Collection | Where-Object { "$($_.bindingInformation)" -match "[:]$Port[:]" } | Select-Object -First 1
                 if ($sitePhys -ine $pathNorm) {
                     Write-Warn "IIS site '$SiteName' already exists but serves '$($existingSite.physicalPath)' (expected '$Path'). Left unchanged - resolve the collision (use a different -SiteName) or point it at '$Path' manually."
                 }
-                elseif (-not $portMatch) {
+                elseif ($null -eq $matchBinding) {
                     Write-Warn "IIS site '$SiteName' serves '$Path' but has no binding on port $Port. Review its bindings manually."
-                    $browseBase = "http://$($env:COMPUTERNAME):$Port"
+                    $firstBinding = $existingSite.bindings.Collection | Select-Object -First 1
+                    if ($null -ne $firstBinding) { $browseBase = Get-BrowseBaseFromBinding -Binding $firstBinding }
                 }
                 else {
                     Write-Ok "IIS site '$SiteName' already serves '$Path' on port $Port."
-                    $browseBase = "http://$($env:COMPUTERNAME):$Port"
+                    $browseBase = Get-BrowseBaseFromBinding -Binding $matchBinding
                 }
             }
             elseif ($PSCmdlet.ShouldProcess("$SiteName (port $Port)", 'Create IIS site')) {
@@ -376,8 +392,10 @@ else {
                 Write-Fail "Parent IIS site '$ParentSite' does not exist. Create it first, or use -SiteName for a dedicated site."
             }
             else {
+                # Build the browse base from the parent site's real binding (protocol/host/port),
+                # not from the site NAME, so the printed URL actually resolves.
                 $binding = $parent.bindings.Collection | Select-Object -First 1
-                $scheme = if ($binding.protocol) { $binding.protocol } else { 'https' }
+                $parentBase = if ($null -ne $binding) { Get-BrowseBaseFromBinding -Binding $binding } else { "https://$env:COMPUTERNAME" }
                 $existingApp = Get-WebApplication -Site $ParentSite -Name $AppAlias -ErrorAction SilentlyContinue
                 if ($null -ne $existingApp) {
                     # A pre-existing sub-application with this alias may point elsewhere; only accept
@@ -388,17 +406,17 @@ else {
                     }
                     else {
                         Write-Ok "Sub-application '/$AppAlias' already serves '$Path' under '$ParentSite'."
-                        $browseBase = "$($scheme)://$ParentSite/$AppAlias"
+                        $browseBase = "$parentBase/$AppAlias"
                     }
                 }
                 elseif ($PSCmdlet.ShouldProcess("$ParentSite/$AppAlias", 'Create IIS sub-application')) {
                     New-WebApplication -Site $ParentSite -Name $AppAlias -PhysicalPath $Path -Force | Out-Null
                     Write-Ok "Created sub-application '/$AppAlias' under '$ParentSite'."
-                    $browseBase = "$($scheme)://$ParentSite/$AppAlias"
+                    $browseBase = "$parentBase/$AppAlias"
                 }
                 else {
                     Write-Info "[WhatIf] Would create sub-application '/$AppAlias' under '$ParentSite'."
-                    $browseBase = "$($scheme)://$ParentSite/$AppAlias"
+                    $browseBase = "$parentBase/$AppAlias"
                 }
             }
         }
