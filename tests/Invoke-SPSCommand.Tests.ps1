@@ -17,6 +17,7 @@ Describe 'Invoke-SPSCommand authentication chain' {
     It 'uses CredSSP only and does not fall back when AllowFallback is off' {
         InModuleScope SPSUpdate.Common {
             Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
+            Mock Get-SPSInstalledProductVersion { [PSCustomObject]@{ ProductMajorPart = 16; ProductBuildPart = 18000 } }
             Mock Invoke-Command { 'remote-output' }
             Mock Remove-PSSession { }
             Mock New-PSSession { New-MockObject -Type ([System.Management.Automation.Runspaces.PSSession]) }
@@ -33,6 +34,7 @@ Describe 'Invoke-SPSCommand authentication chain' {
     It 'throws the original CredSSP error when CredSSP fails and fallback is off' {
         InModuleScope SPSUpdate.Common {
             Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
+            Mock Get-SPSInstalledProductVersion { [PSCustomObject]@{ ProductMajorPart = 16; ProductBuildPart = 18000 } }
             Mock Invoke-Command { 'remote-output' }
             Mock Remove-PSSession { }
             Mock New-PSSession { throw 'CredSSP not configured' }
@@ -46,6 +48,7 @@ Describe 'Invoke-SPSCommand authentication chain' {
     It 'falls back to Negotiate when CredSSP fails and AllowFallback is on' {
         InModuleScope SPSUpdate.Common {
             Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
+            Mock Get-SPSInstalledProductVersion { [PSCustomObject]@{ ProductMajorPart = 16; ProductBuildPart = 18000 } }
             Mock Invoke-Command { 'remote-output' }
             Mock Remove-PSSession { }
             Mock New-PSSession {
@@ -70,6 +73,7 @@ Describe 'Invoke-SPSCommand authentication chain' {
     It 'throws an aggregated error that keeps every authentication method error' {
         InModuleScope SPSUpdate.Common {
             Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
+            Mock Get-SPSInstalledProductVersion { [PSCustomObject]@{ ProductMajorPart = 16; ProductBuildPart = 18000 } }
             Mock Invoke-Command { 'remote-output' }
             Mock Remove-PSSession { }
             Mock New-PSSession {
@@ -94,6 +98,7 @@ Describe 'Invoke-SPSCommand authentication chain' {
     It 'does not run the remote command when no session can be opened' {
         InModuleScope SPSUpdate.Common {
             Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
+            Mock Get-SPSInstalledProductVersion { [PSCustomObject]@{ ProductMajorPart = 16; ProductBuildPart = 18000 } }
             Mock Invoke-Command { 'remote-output' }
             Mock Remove-PSSession { }
             Mock New-PSSession { throw 'unreachable' }
@@ -102,6 +107,42 @@ Describe 'Invoke-SPSCommand authentication chain' {
             { Invoke-SPSCommand -Credential $cred -Server 'APP01' -ScriptBlock { 'x' } -WarningAction SilentlyContinue } |
                 Should -Throw
             Should -Invoke Invoke-Command -Times 0 -Exactly
+        }
+    }
+}
+
+Describe 'Invoke-SPSCommand SharePoint loader selection' {
+    It 'prepends the SharePointServer module loader on Subscription Edition (16.0)' {
+        InModuleScope SPSUpdate.Common {
+            Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
+            Mock Get-SPSInstalledProductVersion { [PSCustomObject]@{ ProductMajorPart = 16; ProductBuildPart = 18000 } }
+            Mock Remove-PSSession { }
+            Mock New-PSSession { New-MockObject -Type ([System.Management.Automation.Runspaces.PSSession]) }
+            $script:capturedSb = $null
+            Mock Invoke-Command { $script:capturedSb = $ScriptBlock.ToString(); 'ok' }
+
+            $cred = [System.Management.Automation.PSCredential]::new('CONTOSO\svc', (New-Object System.Security.SecureString))
+            Invoke-SPSCommand -Credential $cred -Server 'APP01' -ScriptBlock { 'x' } | Out-Null
+
+            $script:capturedSb | Should -Match 'Import-Module SharePointServer'
+            $script:capturedSb | Should -Not -Match 'Add-PSSnapin'
+        }
+    }
+
+    It 'prepends the legacy snap-in loader on SharePoint 2016/2019 (major 15 or build <= 12999)' {
+        InModuleScope SPSUpdate.Common {
+            Mock Get-SPSRemoteSessionOption { [PSCustomObject]@{} }
+            Mock Get-SPSInstalledProductVersion { [PSCustomObject]@{ ProductMajorPart = 16; ProductBuildPart = 10000 } }
+            Mock Remove-PSSession { }
+            Mock New-PSSession { New-MockObject -Type ([System.Management.Automation.Runspaces.PSSession]) }
+            $script:capturedSb = $null
+            Mock Invoke-Command { $script:capturedSb = $ScriptBlock.ToString(); 'ok' }
+
+            $cred = [System.Management.Automation.PSCredential]::new('CONTOSO\svc', (New-Object System.Security.SecureString))
+            Invoke-SPSCommand -Credential $cred -Server 'APP01' -ScriptBlock { 'x' } | Out-Null
+
+            $script:capturedSb | Should -Match 'Add-PSSnapin Microsoft.SharePoint.PowerShell'
+            $script:capturedSb | Should -Not -Match 'Import-Module SharePointServer'
         }
     }
 }
