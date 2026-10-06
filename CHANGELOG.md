@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-10-06
+
 ### Added
 
 - **SharePoint 2016 / 2019 compatibility restored on the `4.x` line.** This maintenance line keeps the full feature set of the `5.x` (Subscription Edition) line but re-introduces support for SharePoint Server 2016 and 2019: the SharePoint cmdlets are loaded through the legacy `Microsoft.SharePoint.PowerShell` snap-in on 2016/2019 (and the `SharePointServer` module on Subscription Edition), both locally and in remote sessions, and `Get-SPSLocalVersionInfo` is version-aware again (`2016`/`2019`/`SE`) so the correct product-name string is matched in the registry. SharePoint 2016, 2019 and Subscription Edition all share the same `16.0` hive and `OSearch16` search service, so no other paths change. Version detection is automatic at runtime (no configuration change). As an added safety check on this multi-version line, `Start-SPSProductUpdate` now compares the update package's product line (2016/2019/SE, derived from the CU build) with the installed SharePoint line and fails fast — before stopping any service or launching the installer — when they do not match. ([#38](https://github.com/luigilink/SPSUpdate/issues/38))
