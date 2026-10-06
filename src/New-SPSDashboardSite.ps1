@@ -204,6 +204,10 @@ else {
 }
 
 # --- 2. SMB share ---------------------------------------------------------------------
+# Track whether the share is actually usable so the final summary only advertises the UNC
+# path when it was really created/verified (never on a module-absent or name-collision skip).
+$shareReady = $false
+$sharePlanned = $false
 if ($SkipShare) {
     Write-Step -Title 'SMB share (skipped)'
     Write-Info 'Skipped (-SkipShare).'
@@ -219,9 +223,11 @@ else {
             if ($PSCmdlet.ShouldProcess("\\$env:COMPUTERNAME\$ShareName", 'Create SMB share')) {
                 New-SmbShare -Name $ShareName -Path $Path -ChangeAccess $WriteAccounts -FullAccess 'BUILTIN\Administrators' -ErrorAction Stop | Out-Null
                 Write-Ok "Created share \\$env:COMPUTERNAME\$ShareName (Modify: $($WriteAccounts -join ', '))"
+                $shareReady = $true
             }
             else {
                 Write-Info "[WhatIf] Would create share \\$env:COMPUTERNAME\$ShareName with Modify for $($WriteAccounts -join ', ')"
+                $sharePlanned = $true
             }
         }
         else {
@@ -233,6 +239,7 @@ else {
             }
             else {
                 Write-Ok "Share \\$env:COMPUTERNAME\$ShareName already exists."
+                $shareReady = $true
                 foreach ($acct in $WriteAccounts) {
                     if ($PSCmdlet.ShouldProcess("$ShareName => $acct", 'Grant SMB Change access')) {
                         Grant-SmbShareAccess -Name $ShareName -AccountName $acct -AccessRight Change -Force -ErrorAction Stop | Out-Null
@@ -377,12 +384,21 @@ Write-Host ''
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ' Done. Next steps' -ForegroundColor Cyan
 Write-Host '============================================================' -ForegroundColor Cyan
-if (-not $SkipShare -and -not [string]::IsNullOrWhiteSpace($ShareName)) {
+if ($shareReady -or $sharePlanned) {
     $uncPath = "\\$env:COMPUTERNAME\$ShareName"
     Write-Host ''
-    Write-Host 'Set this in your SPSUpdate config (shared UNC so every farm server publishes to it):' -ForegroundColor Gray
+    if ($sharePlanned) {
+        Write-Host '[WhatIf] Once the share is created, set this in your SPSUpdate config (shared UNC so every farm server publishes to it):' -ForegroundColor Gray
+    }
+    else {
+        Write-Host 'Set this in your SPSUpdate config (shared UNC so every farm server publishes to it):' -ForegroundColor Gray
+    }
     Write-Host "    StatusStorePath = '$uncPath'" -ForegroundColor White
     Write-Host "    Dashboard = @{ OutputPath = '$uncPath' }" -ForegroundColor White
+}
+elseif (-not $SkipShare) {
+    Write-Host ''
+    Write-Warn 'The SMB share was not created/verified (module missing or name collision); the config UNC path above is not shown. Create the share manually, then set StatusStorePath / Dashboard.OutputPath to it.'
 }
 if (-not [string]::IsNullOrWhiteSpace($browseBase)) {
     Write-Host ''
