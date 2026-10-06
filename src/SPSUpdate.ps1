@@ -416,6 +416,12 @@ function Write-SPSDashboard {
 # (Default run) calls this, so a worker's possibly stale local ContentDBs.json can never overwrite
 # it. Safe no-op when there is no local inventory or no campaign path.
 function Publish-SPSInventorySnapshot {
+    # -NeutralizeOnly writes the snapshot with every database's UpgradeStatus set to 'Unknown'
+    # without reading live SharePoint. Used by ResetStatus (a status-only action that does not load
+    # SharePoint): it guarantees the waiting dashboard shows a neutral upgrade status even when the
+    # cached Config inventory was produced by an older SPSUpdate that baked a now-stale flag, so a
+    # pre-existing cache can never resurface a false 'Upgrade available' / inconsistency banner.
+    param([switch] $NeutralizeOnly)
     if ([string]::IsNullOrEmpty($statusCampaignPath)) { return }
     if (-not (Test-Path -Path $spsUpdateDBsPath)) { return }
     try {
@@ -431,17 +437,20 @@ function Publish-SPSInventorySnapshot {
             # or absent (older inventory generated before the field existed). Refresh the upgrade
             # baseline from live SharePoint while preserving the saved database and sequence layout;
             # databases that cannot be resolved live (for example not yet mounted) are marked
-            # 'Unknown' rather than silently 'healthy'.
+            # 'Unknown' rather than silently 'healthy'. When -NeutralizeOnly is set the live read is
+            # skipped, so the lookup stays empty and every database is written 'Unknown' below.
             $liveUpgrade = @{}
-            try {
-                foreach ($cdb in @(Get-SPContentDatabase -ErrorAction Stop)) {
-                    if ($null -ne $cdb -and -not [string]::IsNullOrEmpty("$($cdb.Name)")) {
-                        $liveUpgrade["$($cdb.Name)".ToLowerInvariant()] = if ($cdb.NeedsUpgrade) { 'Upgrade available' } else { 'No update pending' }
+            if (-not $NeutralizeOnly) {
+                try {
+                    foreach ($cdb in @(Get-SPContentDatabase -ErrorAction Stop)) {
+                        if ($null -ne $cdb -and -not [string]::IsNullOrEmpty("$($cdb.Name)")) {
+                            $liveUpgrade["$($cdb.Name)".ToLowerInvariant()] = if ($cdb.NeedsUpgrade) { 'Upgrade available' } else { 'No update pending' }
+                        }
                     }
                 }
-            }
-            catch {
-                Write-Verbose -Message "Could not read live content-database upgrade status: $($_.Exception.Message)"
+                catch {
+                    Write-Verbose -Message "Could not read live content-database upgrade status: $($_.Exception.Message)"
+                }
             }
             # Always walk the inventory so a stale baseline is never kept: every database gets its
             # live value, and any entry not resolved live (empty lookup, or not yet mounted) is
@@ -987,6 +996,11 @@ switch ($Action) {
                 catch {
                     Write-Warning -Message "Could not persist the campaign master marker during ResetStatus: $($_.Exception.Message)"
                 }
+                # Publish a neutral inventory snapshot (every content database 'Unknown') so the
+                # waiting dashboard never shows a stale 'Upgrade available' / inconsistency banner
+                # from a cached inventory baked by an older SPSUpdate. ResetStatus does not load
+                # SharePoint, so the live upgrade status is resolved later on the Default baseline.
+                Publish-SPSInventorySnapshot -NeutralizeOnly
                 # Generate the empty dashboard now so it is ready to open before patching. The
                 # operator runs ResetStatus on the orchestrator, so publish the initial hosted copy
                 # explicitly.
