@@ -23,16 +23,29 @@
     )
     $VerbosePreference = 'Continue'
 
-    # Base script to ensure the SharePointServer module is loaded in the remote session.
-    # SharePoint Server Subscription Edition exposes its cmdlets through the SharePointServer
-    # module; load it idempotently before running the caller's script block.
-    $baseScript = @"
+    # Base script to ensure the SharePoint cmdlets are loaded in the remote session. On SharePoint
+    # 2016/2019 the legacy PSSnapin (Microsoft.SharePoint.PowerShell) is required; on Subscription
+    # Edition the cmdlets come from the SharePointServer module. The farm is homogeneous, so the
+    # master's installed version selects the loader for every remote session.
+    $installedVersion = Get-SPSInstalledProductVersion
+    if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999) {
+        $baseScript = @"
+            if (`$null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue))
+            {
+                Add-PSSnapin Microsoft.SharePoint.PowerShell
+            }
+
+"@
+    }
+    else {
+        $baseScript = @"
             if (`$null -eq (Get-Module -Name SharePointServer))
             {
                 Import-Module SharePointServer -Verbose:`$false -WarningAction SilentlyContinue
             }
 
 "@
+    }
 
     # Prepare the arguments for Invoke-Command
     $invokeArgs = @{

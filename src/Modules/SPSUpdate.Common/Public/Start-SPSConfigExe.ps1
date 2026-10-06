@@ -2,9 +2,21 @@
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param ()
 
-    # SharePoint Server Subscription Edition installs under the 16.0 hive.
-    $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\16.0\WSS'
-    $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
+    # Resolve the WSS hive and binary directory for the installed SharePoint version: 15.0 on
+    # SharePoint 2016, 16.0 on SharePoint 2019 and Subscription Edition. Defaults to the 16.0 hive
+    # when the SharePoint assembly cannot be located (for example off a SharePoint host).
+    $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
+    $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
+    $spMajor = 16
+    if ($null -ne $fullPath) { $spMajor = ((Get-Command $fullPath).FileVersionInfo).FileMajorPart }
+    if ($spMajor -eq 15) {
+        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\15.0\WSS'
+        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\15\BIN"
+    }
+    else {
+        $wssRegKey = 'hklm:SOFTWARE\Microsoft\Shared Tools\Web Server Extensions\16.0\WSS'
+        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
+    }
     $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
 
     # Read LanguagePackInstalled and SetupType registry keys
@@ -34,8 +46,12 @@
             $count++
         }
 
-        # Prepare the farm for the in-place build-to-build upgrade before running psconfig.
-        Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
+        # Fix for an issue with psconfig on SharePoint 2019 and Subscription Edition (16.0): prepare
+        # the farm for the in-place build-to-build upgrade before running psconfig. Not needed on
+        # SharePoint 2016 (15.0).
+        if ($spMajor -ne 15) {
+            Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
+        }
 
         $stdOutTempFile = "$env:TEMP\$((New-Guid).Guid)"
         $psconfig = Start-Process -FilePath $psconfigExe `

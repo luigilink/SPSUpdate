@@ -15,19 +15,35 @@
         $AllowFallback
     )
 
-    # SharePoint Server Subscription Edition installs under the 16.0 hive.
-    $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
+    # Resolve the psconfig.exe path for the installed SharePoint version: 15.0 on SharePoint 2016,
+    # 16.0 on SharePoint 2019 and Subscription Edition. The farm is homogeneous, so the master's
+    # version applies to the remote server too. Defaults to the 16.0 hive when the SharePoint
+    # assembly cannot be located (for example off a SharePoint host).
+    $pathToSearch = 'C:\Program Files\Common Files\microsoft shared\Web Server Extensions\*\ISAPI\Microsoft.SharePoint.dll'
+    $fullPath = Get-Item $pathToSearch -ErrorAction SilentlyContinue | Sort-Object { $_.Directory } -Descending | Select-Object -First 1
+    $spMajor = 16
+    if ($null -ne $fullPath) { $spMajor = ((Get-Command $fullPath).FileVersionInfo).FileMajorPart }
+    if ($spMajor -eq 15) {
+        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\15\BIN"
+    }
+    else {
+        $binaryDir = Join-Path $env:CommonProgramFiles "Microsoft Shared\Web Server Extensions\16\BIN"
+    }
     $psconfigExe = Join-Path -Path $binaryDir -ChildPath "psconfig.exe"
+    # Upgrade-SPFarm is needed on 2019/SE (16.0) but not on 2016 (15.0); decide on the master and
+    # pass the flag into the remote script block.
+    $needsFarmUpgrade = ($spMajor -ne 15)
 
     # Start wizard
     Write-Verbose -Message "Starting Configuration Wizard on server: $Server"
     $result = Invoke-SPSCommand -Credential $InstallAccount `
         -Server $Server `
         -AllowFallback:$AllowFallback `
-        -Arguments $psconfigExe `
+        -Arguments @($psconfigExe, $needsFarmUpgrade) `
         -ScriptBlock {
 
         $psconfigExe = $args[0]
+        $needsFarmUpgrade = $args[1]
 
         Write-Verbose -Message "Starting 'Product Version Job' timer job"
         $pvTimerJob = Get-SPTimerJob -Identity 'job-admin-product-version'
@@ -46,8 +62,11 @@
             $count++
         }
 
-        # Prepare the farm for the in-place build-to-build upgrade before running psconfig.
-        Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
+        # Fix for an issue with psconfig on SharePoint 2019 and Subscription Edition (16.0): prepare
+        # the farm for the in-place build-to-build upgrade before running psconfig. Not on 2016.
+        if ($needsFarmUpgrade) {
+            Upgrade-SPFarm -ServerOnly -SkipDatabaseUpgrade -SkipSiteUpgrade -Confirm:$false
+        }
 
         $stdOutTempFile = "$env:TEMP\$((New-Guid).Guid)"
         $psconfig = Start-Process -FilePath $psconfigExe `
