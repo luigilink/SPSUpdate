@@ -226,18 +226,21 @@ else {
         }
         else {
             if ("$($existingShare.Path)" -ne "$Path") {
-                Write-Warn "Share '$ShareName' already exists but points to '$($existingShare.Path)' (expected '$Path'). Left unchanged - review it manually."
+                # The share name is already taken by an UNRELATED folder: do NOT grant our write
+                # accounts Change access to someone else's share. Warn and skip the permission
+                # reconciliation entirely; the operator must resolve the collision manually.
+                Write-Warn "Share '$ShareName' already exists but points to '$($existingShare.Path)' (expected '$Path'). Left unchanged and permissions NOT modified - resolve the name collision manually (use a different -ShareName)."
             }
             else {
                 Write-Ok "Share \\$env:COMPUTERNAME\$ShareName already exists."
-            }
-            foreach ($acct in $WriteAccounts) {
-                if ($PSCmdlet.ShouldProcess("$ShareName => $acct", 'Grant SMB Change access')) {
-                    Grant-SmbShareAccess -Name $ShareName -AccountName $acct -AccessRight Change -Force -ErrorAction Stop | Out-Null
-                    Write-Ok "Granted SMB Modify to $acct on $ShareName"
-                }
-                else {
-                    Write-Info "[WhatIf] Would grant SMB Modify to $acct on $ShareName"
+                foreach ($acct in $WriteAccounts) {
+                    if ($PSCmdlet.ShouldProcess("$ShareName => $acct", 'Grant SMB Change access')) {
+                        Grant-SmbShareAccess -Name $ShareName -AccountName $acct -AccessRight Change -Force -ErrorAction Stop | Out-Null
+                        Write-Ok "Granted SMB Modify to $acct on $ShareName"
+                    }
+                    else {
+                        Write-Info "[WhatIf] Would grant SMB Modify to $acct on $ShareName"
+                    }
                 }
             }
         }

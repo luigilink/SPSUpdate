@@ -292,6 +292,56 @@ else {
         catch {
             Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (current user)' -Status 'FAIL' -Detail "Cannot write to $dashOutputPath : $($_.Exception.Message)"
         }
+
+        # Scheduled sequences and the boot-triggered ConfirmReboot render the dashboard AS the
+        # InstallAccount, so the current-user probe above is not enough. When OutputPath is a
+        # distinct folder from the status store (whose service-account write was already probed),
+        # probe it as the InstallAccount too, otherwise worker renders could fail while readiness
+        # passes.
+        $storeForCompare = ''
+        if ($null -ne $cfg -and $cfg.Contains('StatusStorePath')) { $storeForCompare = ([string]$cfg.StatusStorePath).TrimEnd('\', '/') }
+        $dashForCompare = $dashOutputPath.TrimEnd('\', '/')
+        if ($dashForCompare -ieq $storeForCompare) {
+            Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'SKIP' -Detail 'Same folder as the status store (already verified above)'
+        }
+        else {
+            $dashSvcCred = $null
+            if ($null -ne $cfg -and $cfg.Contains('CredentialKey') -and $cfg.CredentialKey -and (Get-Command -Name Get-SPSSecret -ErrorAction SilentlyContinue)) {
+                $dashConfigFolder = Split-Path -Path $ConfigFile -Parent
+                if ([string]::IsNullOrEmpty($dashConfigFolder)) { $dashConfigFolder = '.' }
+                try { $dashSvcCred = Get-SPSSecret -CredentialKey $cfg.CredentialKey -ConfigPath $dashConfigFolder -ErrorAction Stop } catch { $dashSvcCred = $null }
+            }
+            if (-not (Test-Path -Path $dashOutputPath)) {
+                Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'SKIP' -Detail 'Folder not found; see the failure above'
+            }
+            elseif ($null -eq $dashSvcCred) {
+                Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'WARN' -Detail 'Could not load the InstallAccount to test; ensure it has Modify on the dashboard folder (scheduled sequences and ConfirmReboot render as that account)'
+            }
+            else {
+                $dashSvcProbe = Join-Path -Path $dashOutputPath -ChildPath (".spsupdate-readiness-svc-{0}.tmp" -f ([guid]::NewGuid().ToString('N')))
+                $dashSvcCmd = "Set-Content -LiteralPath '$dashSvcProbe' -Value 'readiness-svc' -ErrorAction Stop"
+                $dashEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($dashSvcCmd))
+                try {
+                    $dashProc = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+                        -Credential $dashSvcCred `
+                        -WorkingDirectory "$env:SystemRoot" `
+                        -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $dashEncoded) `
+                        -Wait -PassThru -ErrorAction Stop
+                    $null = $dashProc
+                    Start-Sleep -Milliseconds 500
+                    if (Test-Path -Path $dashSvcProbe) {
+                        Remove-Item -Path $dashSvcProbe -Force -ErrorAction SilentlyContinue
+                        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'PASS' -Detail "InstallAccount '$($dashSvcCred.UserName)' can write to the dashboard folder"
+                    }
+                    else {
+                        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'FAIL' -Detail "InstallAccount '$($dashSvcCred.UserName)' cannot write to $dashOutputPath. Grant it Modify; otherwise worker renders (sequences, ConfirmReboot) will not update the hosted dashboard."
+                    }
+                }
+                catch {
+                    Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'WARN' -Detail "Could not launch a probe as '$($dashSvcCred.UserName)' ($($_.Exception.Message)). Verify it has 'Log on as a batch job' and Modify on the dashboard folder."
+                }
+            }
+        }
     }
 }
 
