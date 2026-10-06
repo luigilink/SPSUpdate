@@ -178,24 +178,19 @@
     # A server has a pending/running reboot? (drives the "Reboot pending" KPI)
     $rebootPendingServers = @($rebootScopes | Where-Object { $_.State -eq 'Pending' -or $_.State -eq 'Running' } | Select-Object -ExpandProperty Server -Unique)
 
-    # Most notable reboot state per server, surfaced on the Binaries card so a failed or completed
-    # reboot is never invisible (previously only a Pending reboot showed a pill, while a Failed
-    # reboot was counted in the donut with nothing on any card to explain it). Priority when a
-    # server has several reboot scopes: Failed > Pending/Running > Done. Skipped = no reboot
-    # required, left quiet.
+    # Reboot state per server, surfaced on the Binaries card so a failed or completed reboot is never
+    # invisible (previously only a Pending reboot showed a pill, while a Failed reboot was counted in
+    # the donut with nothing on any card to explain it). The status store keeps one Reboot scope per
+    # server (<Server>__Reboot.json), so each server maps to a single state.
     $rebootByServer = @{}
     foreach ($r in $rebootScopes) {
         $rSrv = "$($r.Server)"
-        if ([string]::IsNullOrEmpty($rSrv)) { continue }
-        $rRank = switch ("$($r.State)") { 'Failed' { 4 } 'Running' { 3 } 'Pending' { 3 } 'Done' { 2 } default { 1 } }
-        if (-not $rebootByServer.ContainsKey($rSrv) -or $rRank -gt $rebootByServer[$rSrv].Rank) {
-            $rebootByServer[$rSrv] = @{ State = "$($r.State)"; Rank = $rRank }
-        }
+        if (-not [string]::IsNullOrEmpty($rSrv)) { $rebootByServer[$rSrv] = "$($r.State)" }
     }
     $rebootPillFor = {
         param($server)
         if (-not $rebootByServer.ContainsKey("$server")) { return '' }
-        switch ($rebootByServer["$server"].State) {
+        switch ($rebootByServer["$server"]) {
             'Failed' { ' <span class="pill failed">Reboot failed</span>' }
             'Running' { ' <span class="pill reboot">Reboot pending</span>' }
             'Pending' { ' <span class="pill reboot">Reboot pending</span>' }
