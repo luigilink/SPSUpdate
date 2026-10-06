@@ -742,7 +742,7 @@ function Invoke-SPSAutomaticReboot {
         Restart-Computer -Force -ErrorAction Stop
         # Restart initiated: stop the transcript so the log file is not locked during shutdown.
         if ($script:TranscriptStarted) {
-            Stop-Transcript -WhatIf:$false | Out-Null
+            Stop-Transcript | Out-Null
             $script:TranscriptStarted = $false
         }
     }
@@ -921,7 +921,7 @@ Inventory file: $($spsUpdateDBsPath)
     Write-Error -Message $catchMessage
     Add-SPSUpdateEvent -Message $catchMessage -Source 'Initialize-SPSContentDbJsonFile' -EntryType 'Error'
     if ($script:TranscriptStarted) {
-        Stop-Transcript -WhatIf:$false | Out-Null
+        Stop-Transcript | Out-Null
         $script:TranscriptStarted = $false
     }
     exit 1
@@ -1144,7 +1144,7 @@ Exception: $_
             Write-Error -Message $catchMessage
             Add-SPSUpdateEvent -Message $catchMessage -Source 'Initialize-SPSContentDbJsonFile' -EntryType 'Error'
             if ($script:TranscriptStarted) {
-                Stop-Transcript -WhatIf:$false | Out-Null
+                Stop-Transcript | Out-Null
                 $script:TranscriptStarted = $false
             }
             exit
@@ -1297,7 +1297,7 @@ Exception: $_
                         Write-Error -Message $catchMessage # Handle any errors during task removal
                         Add-SPSUpdateEvent -Message $catchMessage -Source 'Add-SPSScheduledTask' -EntryType 'Error'
                         if ($script:TranscriptStarted) {
-                            Stop-Transcript -WhatIf:$false | Out-Null
+                            Stop-Transcript | Out-Null
                             $script:TranscriptStarted = $false
                         }
                         exit
@@ -1436,7 +1436,7 @@ Exception: $_
             Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Failed' -Detail "$($_.Exception.Message)"
             Write-SPSDashboard
             if ($script:TranscriptStarted) {
-                Stop-Transcript -WhatIf:$false | Out-Null
+                Stop-Transcript | Out-Null
                 $script:TranscriptStarted = $false
             }
             exit
@@ -1506,7 +1506,7 @@ Exception: $_
                     Write-SPSStatus -Scope $seqScope -Phase $seqPhase -State 'Failed' -Detail "$dbDone/$dbTotal processed; $failedCount failed"
                     Write-SPSDashboard
                     if ($script:TranscriptStarted) {
-                        Stop-Transcript -WhatIf:$false | Out-Null
+                        Stop-Transcript | Out-Null
                         $script:TranscriptStarted = $false
                     }
                     exit 1
@@ -1526,7 +1526,7 @@ Exception: $_
                 # Exit non-zero so an orchestrating window run (Start-SPSSequenceWindows) can detect
                 # the failure from the process exit code; the scheduled-task path ignores it.
                 if ($script:TranscriptStarted) {
-                    Stop-Transcript -WhatIf:$false | Out-Null
+                    Stop-Transcript | Out-Null
                     $script:TranscriptStarted = $false
                 }
                 exit 1
@@ -1551,7 +1551,7 @@ Exception: $_
                 Write-Error -Message $catchMessage
                 Add-SPSUpdateEvent -Message $catchMessage -Source 'Get-SPSSecret' -EntryType 'Error'
                 if ($script:TranscriptStarted) {
-                    Stop-Transcript -WhatIf:$false | Out-Null
+                    Stop-Transcript | Out-Null
                     $script:TranscriptStarted = $false
                 }
                 exit
@@ -1624,7 +1624,7 @@ Exception: $_
                         Write-Error -Message $catchMessage
                         Add-SPSUpdateEvent -Message $catchMessage -Source 'Add-SPSScheduledTask' -EntryType 'Error'
                         if ($script:TranscriptStarted) {
-                            Stop-Transcript -WhatIf:$false | Out-Null
+                            Stop-Transcript | Out-Null
                             $script:TranscriptStarted = $false
                         }
                         exit
@@ -1855,7 +1855,7 @@ Write-Output "| Started on  - $DateStarted"
 Write-Output "| Ended on    - $DateEnded"
 Write-Output '-----------------------------------------------'
 if ($script:TranscriptStarted) {
-    Stop-Transcript -WhatIf:$false | Out-Null
+    Stop-Transcript | Out-Null
     $script:TranscriptStarted = $false
 }
 Remove-Module -Name 'SPSUpdate.Common' -ErrorAction SilentlyContinue
