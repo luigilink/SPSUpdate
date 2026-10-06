@@ -40,9 +40,9 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
     $fileVersion = $setupFileInfo.VersionInfo.FileVersion
     Write-Verbose -Message "Update has version $fileVersion"
     $fileVersionInfo = New-Object -TypeName System.Version -ArgumentList $fileVersion
-    # Derive the SharePoint product line from the CU package build number so the right version
-    # strings and service names are used: a 4-digit build is 2016, build < 13000 is 2019, otherwise
-    # Subscription Edition.
+    # Derive the SharePoint product line from the CU package build number so the right product-name
+    # string is matched in the registry by Get-SPSLocalVersionInfo: a 4-digit build is 2016, build
+    # < 13000 is 2019, otherwise Subscription Edition.
     if ($fileVersionInfo.Build.ToString().Length -eq 4) {
         $sharePointVersion = '2016'
     }
@@ -70,14 +70,9 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
         # Version of SharePoint is lower than the patch version. Patch is not installed.
         Write-Verbose -Message "The version of SharePoint installed is lower than the update. Starting update process."
         if ($ShutdownServices) {
-            # The search service instance is OSearch15 on SharePoint 2016 and OSearch16 on 2019/SE.
-            $listOfServices = @("SPSearchHostController", "SPTimerV4", "IISADMIN")
-            if ($sharePointVersion -eq '2016') {
-                $listOfServices += "OSearch15"
-            }
-            else {
-                $listOfServices += "OSearch16"
-            }
+            # SharePoint 2016, 2019 and Subscription Edition all use the OSearch16 search service
+            # instance (OSearch15 belongs to SharePoint 2013, which this line does not support).
+            $listOfServices = @("SPSearchHostController", "SPTimerV4", "IISADMIN", "OSearch16")
             Write-Verbose -Message "Gettings services status before stopping services for installation."
             $servicesStatusFilePath = Join-Path -Path $PSScriptRoot -ChildPath "ServicesStatus_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMddHHmmss').json"
             Get-Service -Name $listOfServices -ErrorAction SilentlyContinue | Select-Object Name, StartType, Status | ConvertTo-Json | Set-Content -Path $servicesStatusFilePath -Force
