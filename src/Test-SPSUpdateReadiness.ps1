@@ -8,7 +8,9 @@
     and exposes the required keys, the service credential exists in secrets.psd1
     and decrypts under the current account (DPAPI), the session is elevated, the
     status store (UNC share, v4.2.0+) is writable, and each farm server is
-    reachable for CredSSP remoting.
+    reachable for CredSSP remoting. When the optional Dashboard.OutputPath is set,
+    it also checks that folder exists and is writable, and warns when it is a
+    master-local (drive-letter) path rather than a shared UNC path.
 
     Read-only: it never changes configuration, credentials or the farm. The only
     side effect is a temporary probe file written and immediately deleted in the
@@ -256,6 +258,91 @@ if ($null -ne $cfg -and $cfg.Contains('StatusStorePath') -and -not [string]::IsN
 }
 else {
     Add-CheckResult -Section 'StatusStore' -Name 'StatusStorePath' -Status 'WARN' -Detail 'Not set; the live dashboard will use the local Results\status folder and will not capture ProductUpdate on other servers'
+}
+
+# 5b. Dashboard hosting (optional Dashboard.OutputPath)
+Write-Section -Title 'Dashboard'
+$dashOutputPath = $null
+if ($null -ne $cfg -and $cfg.Contains('Dashboard') -and $null -ne $cfg.Dashboard) {
+    try { $dashOutputPath = [string]$cfg.Dashboard.OutputPath } catch { $dashOutputPath = $null }
+}
+if ([string]::IsNullOrWhiteSpace($dashOutputPath)) {
+    Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath' -Status 'SKIP' -Detail 'Not set; the dashboard is written into the status store campaign folder'
+}
+else {
+    # A shared UNC path (\\server\share\...) lets every farm server publish the hosted copy; a
+    # drive-letter path is master-local, so worker runs cannot update it (see the IIS hosting wiki).
+    $isUnc = $dashOutputPath.StartsWith('\\') -or $dashOutputPath.StartsWith('//')
+    if ($isUnc) {
+        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath is shared (UNC)' -Status 'PASS' -Detail $dashOutputPath
+    }
+    else {
+        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath is shared (UNC)' -Status 'WARN' -Detail "'$dashOutputPath' is a local path, writable only by the master; worker runs (distributed ProductUpdate, ConfirmReboot) cannot update the hosted dashboard. Prefer a shared UNC path served by IIS (see the Hosting the dashboard on IIS wiki)."
+    }
+    if (-not (Test-Path -Path $dashOutputPath)) {
+        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath exists' -Status 'FAIL' -Detail "Folder not found: $dashOutputPath. SPSUpdate does not create it; provision it first (see New-SPSDashboardSite.ps1)."
+    }
+    else {
+        $dashProbe = Join-Path -Path $dashOutputPath -ChildPath (".spsupdate-readiness-{0}.tmp" -f ([guid]::NewGuid().ToString('N')))
+        try {
+            Set-Content -Path $dashProbe -Value 'readiness' -ErrorAction Stop
+            Remove-Item -Path $dashProbe -Force -ErrorAction SilentlyContinue
+            Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (current user)' -Status 'PASS' -Detail $dashOutputPath
+        }
+        catch {
+            Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (current user)' -Status 'FAIL' -Detail "Cannot write to $dashOutputPath : $($_.Exception.Message)"
+        }
+
+        # Scheduled sequences and the boot-triggered ConfirmReboot render the dashboard AS the
+        # InstallAccount, so the current-user probe above is not enough. When OutputPath is a
+        # distinct folder from the status store (whose service-account write was already probed),
+        # probe it as the InstallAccount too, otherwise worker renders could fail while readiness
+        # passes.
+        $storeForCompare = ''
+        if ($null -ne $cfg -and $cfg.Contains('StatusStorePath')) { $storeForCompare = ([string]$cfg.StatusStorePath).TrimEnd('\', '/') }
+        $dashForCompare = $dashOutputPath.TrimEnd('\', '/')
+        if ($dashForCompare -ieq $storeForCompare) {
+            Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'SKIP' -Detail 'Same folder as the status store (already verified above)'
+        }
+        else {
+            $dashSvcCred = $null
+            if ($null -ne $cfg -and $cfg.Contains('CredentialKey') -and $cfg.CredentialKey -and (Get-Command -Name Get-SPSSecret -ErrorAction SilentlyContinue)) {
+                $dashConfigFolder = Split-Path -Path $ConfigFile -Parent
+                if ([string]::IsNullOrEmpty($dashConfigFolder)) { $dashConfigFolder = '.' }
+                try { $dashSvcCred = Get-SPSSecret -CredentialKey $cfg.CredentialKey -ConfigPath $dashConfigFolder -ErrorAction Stop } catch { $dashSvcCred = $null }
+            }
+            if (-not (Test-Path -Path $dashOutputPath)) {
+                Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'SKIP' -Detail 'Folder not found; see the failure above'
+            }
+            elseif ($null -eq $dashSvcCred) {
+                Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'WARN' -Detail 'Could not load the InstallAccount to test; ensure it has Modify on the dashboard folder (scheduled sequences and ConfirmReboot render as that account)'
+            }
+            else {
+                $dashSvcProbe = Join-Path -Path $dashOutputPath -ChildPath (".spsupdate-readiness-svc-{0}.tmp" -f ([guid]::NewGuid().ToString('N')))
+                $dashSvcCmd = "Set-Content -LiteralPath '$dashSvcProbe' -Value 'readiness-svc' -ErrorAction Stop"
+                $dashEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($dashSvcCmd))
+                try {
+                    $dashProc = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+                        -Credential $dashSvcCred `
+                        -WorkingDirectory "$env:SystemRoot" `
+                        -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $dashEncoded) `
+                        -Wait -PassThru -ErrorAction Stop
+                    $null = $dashProc
+                    Start-Sleep -Milliseconds 500
+                    if (Test-Path -Path $dashSvcProbe) {
+                        Remove-Item -Path $dashSvcProbe -Force -ErrorAction SilentlyContinue
+                        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'PASS' -Detail "InstallAccount '$($dashSvcCred.UserName)' can write to the dashboard folder"
+                    }
+                    else {
+                        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'FAIL' -Detail "InstallAccount '$($dashSvcCred.UserName)' cannot write to $dashOutputPath. Grant it Modify; otherwise worker renders (sequences, ConfirmReboot) will not update the hosted dashboard."
+                    }
+                }
+                catch {
+                    Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'WARN' -Detail "Could not launch a probe as '$($dashSvcCred.UserName)' ($($_.Exception.Message)). Verify it has 'Log on as a batch job' and Modify on the dashboard folder."
+                }
+            }
+        }
+    }
 }
 
 # 6. Network / CredSSP reachability

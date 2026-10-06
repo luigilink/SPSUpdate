@@ -243,6 +243,10 @@ too — so a deferred `ConfirmReboot` that finishes after the master run exits s
 hosted dashboard. For a distributed farm where you want the hosted dashboard to update in near real
 time, prefer a shared UNC `OutputPath` over a path that only exists locally on each server.
 
+To serve this folder over HTTP (fileshare + IIS binding, like the SPSConfigKit pull-server
+dashboard), see [Hosting the dashboard on IIS](Hosting-the-dashboard-on-IIS) and the standalone
+`New-SPSDashboardSite.ps1` helper.
+
 The dashboard file name is derived per farm — `<App>-<Env>-<Farm>-dashboard.html` — so several
 farms (INT / Preprod / PROD) can share a single IIS folder without colliding. At the start of a
 new campaign (`-Action ResetStatus`) the previous dashboard is archived to

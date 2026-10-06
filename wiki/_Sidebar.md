@@ -5,6 +5,7 @@
 - [⚙️ Configuration](Configuration)
 - [📖 Usage](Usage)
   - [📊 Live dashboard](Usage#near-real-time-patching-dashboard)
+  - [🌐 Hosting the dashboard on IIS](Hosting-the-dashboard-on-IIS)
   - [🔁 Automatic reboot](Usage#automatic-reboot-after-a-cu-install)
 - [📦 Release Process](Release-Process)
 
