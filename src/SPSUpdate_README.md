@@ -8,14 +8,18 @@ SharePoint environment.
 > This guide ships inside the release package so it is available offline on the server.
 > For the full online documentation, see the [SPSUpdate Wiki](https://github.com/luigilink/SPSUpdate/wiki).
 
-> **Subscription Edition only.** SharePoint Server 2016 and 2019 reached end of support on
-> 14 July 2026. If you still run those versions (including generating the ContentDatabase
-> inventory on a 2019 source farm during a migration), use the previous major release
-> v4.2.0.
+> **SharePoint Server 2016 / 2019 / Subscription Edition.** This is the `4.x` maintenance line,
+> which keeps compatibility with SharePoint Server 2016 and 2019 (loading the legacy
+> `Microsoft.SharePoint.PowerShell` snap-in) in addition to Subscription Edition. If you run
+> **only** Subscription Edition, use the `5.x` line instead.
+>
+> ⚠️ SharePoint Server 2016 and 2019 reached **Microsoft end of support on 14 July 2026** and no
+> longer receive security updates. This line restores SPSUpdate **tooling compatibility** with those
+> versions; it does **not** restore vendor support. Plan a migration to Subscription Edition.
 
 ## 📦 Prerequisites
 
-- SharePoint Server Subscription Edition
+- SharePoint Server 2016, 2019 or Subscription Edition
 - Administrator privileges on the server
 - PowerShell 5.1 or later (no DSC module required)
 - A service account (`InstallAccount`) for the scheduled tasks and CredSSP remoting
@@ -205,7 +209,8 @@ E:\SCRIPT\SPSUpdate.ps1 -Action Uninstall -ConfigFile 'E:\SCRIPT\Config\CONTOSO-
 
 - Creates a `Logs` folder and a per-run transcript (sequence/action-aware naming).
 - Verifies the script runs with Administrator rights before proceeding.
-- Loads the `SharePointServer` module (SharePoint Server Subscription Edition).
+- Detects the installed SharePoint version (`Get-SPSInstalledProductVersion`) and loads the
+  appropriate SharePoint snap-in (2016/2019) or the `SharePointServer` module (SE).
 - Full mode creates four sequence tasks (`SPSUpdate-Sequence1..4`) and starts them in
   parallel (with short random sleeps to avoid OWSTimer conflicts).
 - Remote operations (PSConfig, side-by-side) use CredSSP and fail with a clear error if the

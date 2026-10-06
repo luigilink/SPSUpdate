@@ -843,14 +843,20 @@ Write-Output '-----------------------------------------------'
 Write-Verbose -Message "Setting power management plan to 'High Performance'..."
 Start-Process -FilePath "$env:SystemRoot\system32\powercfg.exe" -ArgumentList '/s 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' -NoNewWindow
 
-# 1. Load the SharePointServer module (SharePoint Server Subscription Edition).
-# Skipped for status-only actions (ResetStatus, ConfirmReboot) that never touch the farm
-# and may run at boot time before SharePoint is fully ready.
+# 1. Load the SharePoint cmdlets. On SharePoint 2016/2019 the legacy PSSnapin
+# (Microsoft.SharePoint.PowerShell) is required; on Subscription Edition the cmdlets come from the
+# SharePointServer module. Skipped for status-only actions (ResetStatus, ConfirmReboot) that never
+# touch the farm and may run at boot time before SharePoint is fully ready.
 if ($Action -ne 'ResetStatus' -and $Action -ne 'ConfirmReboot') {
     try {
         $installedVersion = Get-SPSInstalledProductVersion
         Write-Output "Installed SharePoint Product Version: $($installedVersion.FileVersion)"
-        if ($null -eq (Get-Module -Name SharePointServer)) {
+        if ($installedVersion.ProductMajorPart -eq 15 -or $installedVersion.ProductBuildPart -le 12999) {
+            if ($null -eq (Get-PSSnapin -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue)) {
+                Add-PSSnapin Microsoft.SharePoint.PowerShell
+            }
+        }
+        elseif ($null -eq (Get-Module -Name SharePointServer)) {
             Import-Module SharePointServer -Verbose:$false -WarningAction SilentlyContinue
         }
     }

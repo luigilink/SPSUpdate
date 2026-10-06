@@ -40,17 +40,49 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
     $fileVersion = $setupFileInfo.VersionInfo.FileVersion
     Write-Verbose -Message "Update has version $fileVersion"
     $fileVersionInfo = New-Object -TypeName System.Version -ArgumentList $fileVersion
+    # Derive the SharePoint product line from the CU package build number so the right product-name
+    # string is matched in the registry by Get-SPSLocalVersionInfo: a 4-digit build is 2016, build
+    # < 13000 is 2019, otherwise Subscription Edition.
+    if ($fileVersionInfo.Build.ToString().Length -eq 4) {
+        $sharePointVersion = '2016'
+    }
+    elseif ($fileVersionInfo.Build -lt 13000) {
+        $sharePointVersion = '2019'
+    }
+    else {
+        $sharePointVersion = 'SE'
+    }
+
+    # Guard against patching a farm with a CU for a different product line (for example a 2019 CU on
+    # a Subscription Edition server). Classify the installed version the same way and fail before any
+    # service is stopped or an incompatible installer is launched when the lines do not match.
+    $installedProductVersion = Get-SPSInstalledProductVersion
+    if ($installedProductVersion.ProductBuildPart.ToString().Length -eq 4) {
+        $installedSharePointVersion = '2016'
+    }
+    elseif ($installedProductVersion.ProductBuildPart -lt 13000) {
+        $installedSharePointVersion = '2019'
+    }
+    else {
+        $installedSharePointVersion = 'SE'
+    }
+    if ($sharePointVersion -ne $installedSharePointVersion) {
+        throw ("The update package targets SharePoint $sharePointVersion (build $($fileVersionInfo)) " +
+            "but this server runs SharePoint $installedSharePointVersion (version " +
+            "$($installedProductVersion.FileVersion)). Use a cumulative update that matches the " +
+            "installed product line.")
+    }
 
     Write-Verbose -Message "Update is a Cumulative Update."
-    # Subscription Edition cumulative update package.
+    # Cumulative update package (SharePoint 2016 / 2019 / Subscription Edition).
     $setupFileInformation = New-Object -TypeName System.IO.FileInfo -ArgumentList  $SetupFile
     if ($setupFileInformation.Name.StartsWith("wssloc")) {
         Write-Verbose -Message "Cumulative Update is multilingual"
-        $versionInfo = Get-SPSLocalVersionInfo -IsWssPackage
+        $versionInfo = Get-SPSLocalVersionInfo -ProductVersion $sharePointVersion -IsWssPackage
     }
     else {
         Write-Verbose -Message "Cumulative Update is generic"
-        $versionInfo = Get-SPSLocalVersionInfo
+        $versionInfo = Get-SPSLocalVersionInfo -ProductVersion $sharePointVersion
     }
 
     Write-Verbose -Message "The lowest version of any SharePoint component is $($versionInfo)"
@@ -58,7 +90,8 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
         # Version of SharePoint is lower than the patch version. Patch is not installed.
         Write-Verbose -Message "The version of SharePoint installed is lower than the update. Starting update process."
         if ($ShutdownServices) {
-            # Subscription Edition search service instance is OSearch16.
+            # SharePoint 2016, 2019 and Subscription Edition all use the OSearch16 search service
+            # instance (OSearch15 belongs to SharePoint 2013, which this line does not support).
             $listOfServices = @("SPSearchHostController", "SPTimerV4", "IISADMIN", "OSearch16")
             Write-Verbose -Message "Gettings services status before stopping services for installation."
             $servicesStatusFilePath = Join-Path -Path $PSScriptRoot -ChildPath "ServicesStatus_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMddHHmmss').json"
