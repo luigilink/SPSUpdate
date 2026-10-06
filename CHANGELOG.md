@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-10-06
+
 ### Added
 
 - The near real-time dashboard now refreshes the live farm status at key transitions (the pre-patch baseline, after the Configuration Wizard completes, and the final render) instead of only at the pre-patch baseline. The master re-reads each server's patch status and re-publishes the content-database inventory with fresh upgrade status, so a successful campaign no longer shows a stale `Upgrade Required` Patch Status or a lingering pre-patch inconsistency banner once the farm is back to `No Action Required`. The Content Databases card also shows a database that SPSUpdate has already upgraded (State `Done`) as `No update pending` even before the next refresh. Server patch status and role are shown with short readable labels (for example `Upgrade Required`, `Application with Search`) via the new public helpers `ConvertTo-SPSPatchStatusLabel` and `ConvertTo-SPSRoleLabel`, instead of the raw enum names. ([#51](https://github.com/luigilink/SPSUpdate/issues/51))
