@@ -175,12 +175,38 @@
     $rebootScopes = @($scopes | Where-Object { $_.Phase -eq 'Reboot' })
     $dbScopes = @($scopes | Where-Object { $_.Phase -eq 'Mount' -or $_.Phase -eq 'Upgrade' -or $_.Phase -eq 'Sequence' })
 
-    # A server has a pending/running reboot?
+    # A server has a pending/running reboot? (drives the "Reboot pending" KPI)
     $rebootPendingServers = @($rebootScopes | Where-Object { $_.State -eq 'Pending' -or $_.State -eq 'Running' } | Select-Object -ExpandProperty Server -Unique)
+
+    # Reboot state per server, surfaced on the Binaries card so a failed or completed reboot is never
+    # invisible (previously only a Pending reboot showed a pill, while a Failed reboot was counted in
+    # the donut with nothing on any card to explain it). The scopes are filtered by Phase, so select
+    # deterministically by priority (Failed > Pending/Running > Done) rather than enumeration order,
+    # so a later Done/Skipped scope can never hide a Failed/pending reboot for the same server.
+    $rebootByServer = @{}
+    foreach ($r in $rebootScopes) {
+        $rSrv = "$($r.Server)"
+        if ([string]::IsNullOrEmpty($rSrv)) { continue }
+        $rRank = switch ("$($r.State)") { 'Failed' { 4 } 'Running' { 3 } 'Pending' { 3 } 'Done' { 2 } default { 1 } }
+        if (-not $rebootByServer.ContainsKey($rSrv) -or $rRank -gt $rebootByServer[$rSrv].Rank) {
+            $rebootByServer[$rSrv] = @{ State = "$($r.State)"; Rank = $rRank }
+        }
+    }
+    $rebootPillFor = {
+        param($server)
+        if (-not $rebootByServer.ContainsKey("$server")) { return '' }
+        switch ($rebootByServer["$server"].State) {
+            'Failed' { ' <span class="pill failed">Reboot failed</span>' }
+            'Running' { ' <span class="pill reboot">Reboot pending</span>' }
+            'Pending' { ' <span class="pill reboot">Reboot pending</span>' }
+            'Done' { ' <span class="pill done">Rebooted</span>' }
+            default { '' }
+        }
+    }
 
     # ---- Card 1: Binaries Installation --------------------------------------------
     $binRows = foreach ($b in $binaries) {
-        $rebootPill = if ($rebootPendingServers -contains $b.Server) { ' <span class="pill reboot">Reboot pending</span>' } else { '' }
+        $rebootPill = & $rebootPillFor $b.Server
         '<tr>' +
         "<td>$(& $serverCell $b.Server $b.Role)</td>" +
         "<td>$(& $pill $b.State)$rebootPill</td>" +
