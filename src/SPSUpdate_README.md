@@ -10,8 +10,9 @@ SharePoint environment.
 
 > **Subscription Edition only.** SharePoint Server 2016 and 2019 reached end of support on
 > 14 July 2026. If you still run those versions (including generating the ContentDatabase
-> inventory on a 2019 source farm during a migration), use the previous major release
-> v4.2.0.
+> inventory on a 2019 source farm during a migration), use the
+> [`4.x` line](https://github.com/luigilink/SPSUpdate/releases/tag/v4.3.0) (latest: v4.3.0),
+> which keeps SharePoint 2016/2019 tooling compatibility.
 
 ## 📦 Prerequisites
 

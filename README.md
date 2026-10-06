@@ -9,7 +9,7 @@
 
 Compatible with **SharePoint Server Subscription Edition**. Requires PowerShell 5.1 or later — no DSC module needed.
 
-> SharePoint Server 2016 and 2019 reached end of support on 14 July 2026. If you still run those versions, use the previous major release [v4.2.0](https://github.com/luigilink/SPSUpdate/releases/tag/v4.2.0) — including to generate the ContentDatabase inventory (`-Action InitContentDB`) on a 2019 source farm during a 2019 → Subscription Edition migration.
+> SharePoint Server 2016 and 2019 reached end of support on 14 July 2026. If you still run those versions, use the [`4.x` line](https://github.com/luigilink/SPSUpdate/releases/tag/v4.3.0) (latest: v4.3.0), which keeps SharePoint 2016/2019 tooling compatibility — including to generate the ContentDatabase inventory (`-Action InitContentDB`) on a 2019 source farm during a 2019 → Subscription Edition migration.
 
 ## Quick links
 
