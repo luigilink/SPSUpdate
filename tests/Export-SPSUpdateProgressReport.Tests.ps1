@@ -314,3 +314,30 @@ Describe 'Export-SPSUpdateProgressReport (reboot state visibility)' {
         $h | Should -Not -Match 'pill done">Rebooted'
     }
 }
+
+Describe 'Export-SPSUpdateProgressReport (reboot state precedence)' {
+    # The reboot pills are selected from scopes filtered by Phase = 'Reboot'. When a server has
+    # more than one such scope, a higher-priority state (Failed > Pending/Running > Done) must win
+    # regardless of enumeration order, so a later Done can never hide a Failed reboot.
+    It 'prefers Failed over Done when Done is written first' {
+        $camp = New-Campaign -Name 'reboot-prec-1'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP2' -State 'Done' -Role 'Application' -Build '16.0.19725.20522' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP2' -State 'Done' -Detail 'Server back online' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'RebootRetry' -Phase 'Reboot' -Server 'APP2' -State 'Failed' -Detail 'Could not register the reboot-confirm task' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match '<span class="pill failed">Reboot failed</span>'
+        $h | Should -Not -Match '<span class="pill done">Rebooted</span>'
+    }
+
+    It 'prefers Failed over Done when Failed is written first' {
+        $camp = New-Campaign -Name 'reboot-prec-2'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP2' -State 'Done' -Role 'Application' -Build '16.0.19725.20522' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP2' -State 'Failed' -Detail 'Could not register the reboot-confirm task' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'RebootRetry' -Phase 'Reboot' -Server 'APP2' -State 'Done' -Detail 'Server back online' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match '<span class="pill failed">Reboot failed</span>'
+        $h | Should -Not -Match '<span class="pill done">Rebooted</span>'
+    }
+}
