@@ -1325,7 +1325,6 @@ Exception: $_
             Write-SPSDashboard
             $rebootRequired = $false
             $installPerformed = $false
-            $puWhatIf = $false
             try {
             foreach ($setupFile in $envCfg.Binaries.SetupFileName) {
                 $fullSetupFilePath = Join-Path -Path $envCfg.Binaries.SetupFullPath -ChildPath $setupFile
@@ -1349,7 +1348,6 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                     Write-Output "[WhatIf] Would install $setupFile on $thisServer (dry run; no changes made)."
                     Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Skipped' -ItemDetail 'WhatIf: would install'
                     Write-SPSDashboard
-                    $puWhatIf = $true
                     continue
                 }
                 # Unblock setup file if it is blocked
@@ -1394,11 +1392,12 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                 }
                 Write-SPSDashboard
             }
-            if ($puWhatIf) {
-                # Dry run: nothing was installed, so mark the scope Skipped (not Done) and do not
-                # stamp a build/completion - otherwise the dashboard would show the server as
-                # patched after a pure -WhatIf run.
-                Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Skipped' -Detail 'WhatIf: dry run, no changes made'
+            if ($WhatIfPreference) {
+                # Genuine dry run (-WhatIf): nothing was installed. Report the scope as Pending with
+                # a cleared build and no completion time (Pending clears CompletedAt), so the
+                # dashboard never shows the server as patched after a pure -WhatIf run. This is keyed
+                # on -WhatIf specifically, not on a per-file -Confirm decline.
+                Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Pending' -Detail 'WhatIf: dry run, no changes made' -Build ''
             }
             else {
                 $puInstalledBuild = ''
