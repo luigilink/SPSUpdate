@@ -107,6 +107,15 @@ Use `ProductUpdate`, `SetupFullPath`, `SetupFileName` and `ShutdownServices` to 
 the binary installation step. `SetupFileName` is an array, so you can list a single uber
 package or the STS + WSSLOC (language) pair, installed in order.
 
+> **Recommendation — keep the update binaries on a local drive.** Point `SetupFullPath` at a
+> **local path on each server** (for example `D:\SoftwarePackages\SPS\cumulativeupdates`), not a
+> UNC share. Running the cumulative-update `.exe` directly from a UNC path (`\\server\share\...`)
+> makes Windows apply its network-zone check and show an interactive **"Open File - Security
+> Warning"** prompt, which `Unblock-File` cannot suppress (it only clears the file's
+> `Zone.Identifier`, not the network-location zone). That prompt blocks an unattended or
+> scheduled-task run. Copy the binaries to a local folder on each farm server first, then set
+> `SetupFullPath` to that local folder.
+
 ### `Binaries.Schedule` (optional)
 
 An optional window restricting **when** the binary install may run:
