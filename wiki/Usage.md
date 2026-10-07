@@ -68,7 +68,7 @@ by the `MountContentDatabase` flow.
 
 > Since v5.0.0 SPSUpdate is Subscription Edition only. To run `InitContentDB` on a
 > **SharePoint Server 2019 source farm** during a 2019 → Subscription Edition migration, use
-> the previous major release [v4.2.0](https://github.com/luigilink/SPSUpdate/releases/tag/v4.2.0).
+> the [`4.x` line](https://github.com/luigilink/SPSUpdate/releases/tag/v4.3.0) (latest: v4.3.0).
 
 It also writes a self-contained HTML report of the inventory under `Results\` (see below).
 
