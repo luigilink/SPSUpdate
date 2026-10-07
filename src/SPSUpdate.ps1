@@ -1535,7 +1535,7 @@ Graceful Stop Distributed Cache: $($envCfg.Binaries.GracefulStopDistributedCache
                 # reads the config-DB product cache, so refresh this server with -Local first.
                 $puPatchStatus = ''
                 if ($installPerformed) {
-                    try { $null = Get-SPProduct -Local } catch { Write-Verbose -Message "Get-SPProduct -Local refresh failed: $($_.Exception.Message)" }
+                    try { $null = Get-SPProduct -Local -ErrorAction Stop } catch { Write-Verbose -Message "Get-SPProduct -Local refresh failed: $($_.Exception.Message)" }
                     try { $puPatchStatus = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $thisServer)" } catch { $puPatchStatus = '' }
                 }
                 if ([string]::IsNullOrWhiteSpace($puPatchStatus)) {
