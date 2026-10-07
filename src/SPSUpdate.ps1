@@ -632,6 +632,24 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
+    # Reconcile a deferred reboot already performed out-of-band: if the pending request predates
+    # the last boot, the required restart has happened (manual / Windows Update) - mark it Done.
+    if ($hasPending -and -not $RebootRequired) {
+        $pendingStamp = $null
+        try { $pendingStamp = [datetime]::Parse((Get-Content -Path $rebootPendingMarker -Raw).Trim(), $null, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $pendingStamp = $null }
+        $lastBoot = $null
+        try { $lastBoot = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime } catch { $lastBoot = $null }
+        if ($null -ne $pendingStamp -and $null -ne $lastBoot -and $lastBoot -gt $pendingStamp) {
+            Write-Output "Deferred reboot for $thisServer already satisfied out-of-band (last boot $lastBoot > request $pendingStamp); reconciling."
+            if ($null -ne $rebootDoneMarker) { Set-Content -Path $rebootDoneMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue }
+            Remove-Item -Path $rebootPendingMarker -Force -ErrorAction SilentlyContinue
+            Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Done' -Detail 'Reboot already completed out-of-band'
+            Add-SPSUpdateEvent -Message "Deferred reboot on $thisServer reconciled: the server was already rebooted out-of-band." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
+            Write-SPSDashboard
+            return
+        }
+    }
+
     # Decide whether a reboot is warranted. Force reboots even on a successful no-reboot
     # install (exit 0), but only when an install actually ran this time, so an already-patched
     # server (null / exit 17025) is never rebooted just because a new campaign started.
