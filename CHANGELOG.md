@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `-Action ProductUpdate` no longer leaves a **stale pre-install Patch Status** on the Binaries Installation card after installing a cumulative update. The live refresh added in #59 read the product/patch status from the configuration-database cache (`SPProductVersions.GetProductVersions`), which is not updated by a local binary install until `Get-SPProduct -Local` runs on the server. SPSUpdate now refreshes the local server's product cache with `Get-SPProduct -Local` before reading, so the card shows the real post-install status (for example `Upgrade Blocked` / `Installation Required`) instead of the pre-install value (`No Action Required`). ([#71](https://github.com/luigilink/SPSUpdate/issues/71))
+
 ## [5.2.0] - 2026-10-07
 
 ### Changed
