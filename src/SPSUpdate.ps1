@@ -1416,7 +1416,20 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
             else {
                 $puInstalledBuild = ''
                 try { $puInstalledBuild = (Get-SPSInstalledProductVersion).FileVersion.ToString() } catch { $puInstalledBuild = '' }
-                Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
+                # Refresh this server's live Patch Status on the Binaries card now that the CU is
+                # installed, so the column reflects the real post-install state (typically
+                # 'Upgrade Required' until the Configuration Wizard runs) instead of the pre-install
+                # value lingering until the next Default run. Same master-side read as the Default
+                # baseline (no remoting); the Content DB / Wizard cards are left to the Default run.
+                # A failed read leaves PatchStatus unset so the last-known-good value is preserved.
+                $puPatchStatus = ''
+                try { $puPatchStatus = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $thisServer)" } catch { $puPatchStatus = '' }
+                if ([string]::IsNullOrWhiteSpace($puPatchStatus)) {
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
+                }
+                else {
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild -PatchStatus $puPatchStatus
+                }
             }
             Write-SPSDashboard
             # Optional automatic reboot (opt-in). No-op unless Reboot.Enable is set. When a
