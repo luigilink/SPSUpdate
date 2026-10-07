@@ -1430,10 +1430,11 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
             else {
                 $puInstalledBuild = ''
                 try { $puInstalledBuild = (Get-SPSInstalledProductVersion).FileVersion.ToString() } catch { $puInstalledBuild = '' }
-                # Refresh this server's live Patch Status only after a real install, so the card
-                # shows the post-install state (no-op runs keep the last-known-good value).
+                # Refresh live Patch Status only after a real install. Get-SPSServersPatchStatus
+                # reads the config-DB product cache, so refresh this server with -Local first.
                 $puPatchStatus = ''
                 if ($installPerformed) {
+                    try { $null = Get-SPProduct -Local } catch { Write-Verbose -Message "Get-SPProduct -Local refresh failed: $($_.Exception.Message)" }
                     try { $puPatchStatus = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $thisServer)" } catch { $puPatchStatus = '' }
                 }
                 if ([string]::IsNullOrWhiteSpace($puPatchStatus)) {
