@@ -208,8 +208,8 @@ When enabled, at the end of `-Action ProductUpdate` on a server:
    inside the optional `Reboot.Schedule` window, SPSUpdate marks the **Reboot** phase as
    *Running* on the dashboard ("Automatic Reboot launched, check the server in a few
    minutes") and logs a Windows Event Log entry (source `Restart-SPSServer`, ID 3010).
-2. It registers a one-shot boot task (`SPSUpdate-RebootConfirm`, running as the
-   InstallAccount) and restarts the server.
+2. It registers a one-shot boot task (`SPSUpdate-RebootConfirm`, running as
+   **`NT AUTHORITY\SYSTEM`** — no stored credential) and restarts the server.
 3. When the server comes back, that task runs `-Action ConfirmReboot`, which marks the
    Reboot phase as *Done* ("Server back online after automatic reboot"), logs the
    completion and removes itself.
@@ -218,6 +218,14 @@ The reboot is triggered **only** by the installer exit code, never by Windows
 pending-reboot registry markers (which commonly stay set on production farms), so it
 happens at most once per patching campaign. Outside the schedule window the dashboard
 shows the reboot as *Pending*; with `Reboot.Enable = $false` no reboot is attempted.
+
+> **Status store access for the reboot confirmation.** Because the boot task runs as
+> `SYSTEM`, it writes its completion to a UNC status store as the **computer account**
+> (`DOMAIN\SERVER$`). Grant the farm machine accounts (for example `Domain Computers`)
+> **Modify** on the status store share **and** NTFS — add them to
+> `New-SPSDashboardSite.ps1 -WriteAccounts`. Without that grant the reboot still happens,
+> but `ConfirmReboot` cannot record it (it logs a clear warning and retries on the next
+> boot). See [Hosting the dashboard on IIS](Hosting-the-dashboard-on-IIS).
 
 Use `-WhatIf` on the `ProductUpdate` run for a full dry run: it skips the binary install
 (and therefore the reboot) and logs what it would do without making any change.

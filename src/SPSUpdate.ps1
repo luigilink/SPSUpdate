@@ -632,6 +632,24 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
+    # Reconcile a deferred reboot already performed out-of-band (pending predates last boot), but
+    # not when this run itself needs a reboot (fresh -RebootRequired, or Force on a successful install).
+    if ($hasPending -and -not $RebootRequired -and -not ($rebootCfg.Force -and $InstallPerformed)) {
+        $pendingStamp = $null
+        try { $pendingStamp = [datetimeoffset]::Parse((Get-Content -Path $rebootPendingMarker -Raw).Trim(), [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).UtcDateTime } catch { $pendingStamp = $null }
+        $lastBoot = $null
+        try { $lastBoot = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime() } catch { $lastBoot = $null }
+        if ($null -ne $pendingStamp -and $null -ne $lastBoot -and $lastBoot -gt $pendingStamp) {
+            Write-Output "Deferred reboot for $thisServer already satisfied out-of-band (last boot $lastBoot > request $pendingStamp); reconciling."
+            if ($null -ne $rebootDoneMarker) { Set-Content -Path $rebootDoneMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue }
+            Remove-Item -Path $rebootPendingMarker -Force -ErrorAction SilentlyContinue
+            Write-SPSStatus -Scope 'Reboot' -Phase 'Reboot' -Server $thisServer -State 'Done' -Detail 'Reboot already completed out-of-band'
+            Add-SPSUpdateEvent -Message "Deferred reboot on $thisServer reconciled: the server was already rebooted out-of-band." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
+            Write-SPSDashboard
+            return
+        }
+    }
+
     # Decide whether a reboot is warranted. Force reboots even on a successful no-reboot
     # install (exit 0), but only when an install actually ran this time, so an already-patched
     # server (null / exit 17025) is never rebooted just because a new campaign started.
@@ -687,16 +705,10 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
-    # Register the one-shot boot-triggered confirmation task (runs as the InstallAccount so it
-    # can write to the status store share). This is REQUIRED: without it nothing transitions
-    # the Reboot phase from Running to Done, so a failure to register aborts the reboot and is
-    # surfaced as Failed rather than leaving the dashboard stuck on Running forever.
+    # Register the one-shot boot task as SYSTEM (no stored credential). REQUIRED: without it the
+    # Reboot phase never reaches Done, so a registration failure aborts the reboot (surfaced Failed).
     $confirmRegistered = $false
     try {
-        $rebootCredential = Get-SPSSecret -CredentialKey $envCfg.CredentialKey -ConfigPath $pathConfigFolder
-        if ($null -eq $rebootCredential) {
-            throw 'the InstallAccount secret could not be loaded to register the reboot-confirm task.'
-        }
         $confirmArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($resolvedConfigFile)`" -Action ConfirmReboot"
         $existingConfirm = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
         if ($null -ne $existingConfirm) {
@@ -705,7 +717,7 @@ function Invoke-SPSAutomaticReboot {
         Add-SPSScheduledTask -Name $script:TaskNameRebootConfirm `
             -Description 'One-shot SPSUpdate task that confirms the automatic reboot completed and self-deletes.' `
             -ActionArguments $confirmArguments `
-            -ExecuteAsCredential $rebootCredential `
+            -RunAsSystem `
             -TaskPath $script:TaskPath `
             -BootTrigger
         # Verify the task is actually registered before we commit to rebooting.
@@ -1045,7 +1057,8 @@ Exception: $_
                 $rebootDoneMarker = Get-SPSRebootMarkerPath -Kind 'done'
                 $campaignReachable = Test-Path -Path $statusCampaignPath -ErrorAction SilentlyContinue
                 if (-not $campaignReachable) {
-                    Write-Warning -Message "Status store campaign folder is unreachable on $thisServer; leaving the confirmation task to retry on the next boot."
+                    Write-Warning -Message ("Status store campaign folder is unreachable on $thisServer; leaving the confirmation task to retry on the next boot. " +
+                        "This boot task runs as SYSTEM, so it reaches a UNC status store as the computer account ($($env:COMPUTERNAME)`$) - make sure the share and NTFS grant the farm machine accounts (for example 'Domain Computers') write access. See the wiki.")
                 }
                 elseif ($null -eq $rebootDoneMarker -or -not (Test-Path -Path $rebootDoneMarker)) {
                     Write-Warning -Message "No reboot guard marker for the current campaign on $thisServer; this reboot-confirmation task is stale and will be removed without recording completion."
@@ -1073,8 +1086,9 @@ Exception: $_
                         Add-SPSUpdateEvent -Message "Automatic reboot completed on $thisServer - server is back online." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
                     }
                     else {
-                        Write-Warning -Message "Could not persist Reboot=Done for $thisServer after several attempts; leaving the confirmation task in place to retry on the next boot."
-                        Add-SPSUpdateEvent -Message "Could not persist the reboot completion status for $thisServer; the confirmation task will retry on the next boot." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                        Write-Warning -Message ("Could not persist Reboot=Done for $thisServer after several attempts; leaving the confirmation task in place to retry on the next boot. " +
+                            "This boot task runs as SYSTEM, so it writes to a UNC status store as the computer account ($($env:COMPUTERNAME)`$) - make sure the share and NTFS grant the farm machine accounts (for example 'Domain Computers') Modify, not just read. See the wiki.")
+                        Add-SPSUpdateEvent -Message "Could not persist the reboot completion status for $thisServer; the confirmation task will retry on the next boot. The SYSTEM boot task writes as the computer account - grant the farm machine accounts Modify on the status store share and NTFS." -Source 'Restart-SPSServer' -EntryType 'Warning'
                     }
                 }
             }
@@ -1422,7 +1436,18 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
             else {
                 $puInstalledBuild = ''
                 try { $puInstalledBuild = (Get-SPSInstalledProductVersion).FileVersion.ToString() } catch { $puInstalledBuild = '' }
-                Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
+                # Refresh this server's live Patch Status only after a real install, so the card
+                # shows the post-install state (no-op runs keep the last-known-good value).
+                $puPatchStatus = ''
+                if ($installPerformed) {
+                    try { $puPatchStatus = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $thisServer)" } catch { $puPatchStatus = '' }
+                }
+                if ([string]::IsNullOrWhiteSpace($puPatchStatus)) {
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
+                }
+                else {
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild -PatchStatus $puPatchStatus
+                }
             }
             Write-SPSDashboard
             # Optional automatic reboot (opt-in). No-op unless Reboot.Enable is set. When a
