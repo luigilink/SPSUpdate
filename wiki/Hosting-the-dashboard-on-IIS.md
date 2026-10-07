@@ -139,6 +139,13 @@ the share:
     -ParentSite 'PSDSCPullServer' -AppAlias 'SPSUpdate'
 ```
 
+> **Both layers are required.** Effective access over a UNC path is the **more restrictive** of the
+> SMB share and NTFS permissions, so the computer accounts must be granted Modify on **both**. A common
+> mistake is to add `Domain Computers` to NTFS only (via the folder's Security tab) while the share
+> still lists just the service account: the reboot confirmation then fails as the machine account even
+> though the folder ACL looks correct. If you grant the accounts after the share already exists, add
+> them to the SMB share too (`Grant-SmbShareAccess -Name 'SPSUpdate$' -AccountName 'CONTOSO\Domain Computers' -AccessRight Change -Force`).
+
 If the share does not grant the machine accounts, the CU still installs and the server still
 reboots, but `-Action ConfirmReboot` cannot persist the completion: it logs a clear warning and
 retries on the next boot, and the dashboard stays on the `Reboot` running state until the grant is
