@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `Set-SPSSideBySideToken` now retries transient SharePoint `SPWebService.Update()` conflicts with a bounded policy (6 attempts, 15 seconds between attempts) instead of failing on the first race with concurrent `PSCONFIG` writes. The retry is conflict-specific: non-conflict errors still fail fast, and a conflict that persists through the budget is surfaced as a failure. ([#79](https://github.com/luigilink/SPSUpdate/issues/79))
+- `-Action ProductUpdate` no longer leaves a **stale pre-install Patch Status** on the Binaries Installation card after installing a cumulative update. The live refresh added in #59 read the product/patch status from the configuration-database cache (`SPProductVersions.GetProductVersions`), which is not updated by a local binary install until `Get-SPProduct -Local` runs on the server. SPSUpdate now refreshes the local server's product cache with `Get-SPProduct -Local` before reading, so the card shows the real post-install status (for example `Upgrade Blocked` / `Installation Required`) instead of the pre-install value (`No Action Required`). ([#71](https://github.com/luigilink/SPSUpdate/issues/71))
 
 ## [5.3.0] - 2026-10-08
 
