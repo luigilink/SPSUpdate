@@ -687,16 +687,15 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
-    # Register the one-shot boot-triggered confirmation task (runs as the InstallAccount so it
-    # can write to the status store share). This is REQUIRED: without it nothing transitions
-    # the Reboot phase from Running to Done, so a failure to register aborts the reboot and is
-    # surfaced as Failed rather than leaving the dashboard stuck on Running forever.
+    # Register the one-shot boot-triggered confirmation task. It runs as SYSTEM so it needs no
+    # stored credential (removing the DPAPI-secret dependency and the per-server password coupling
+    # that could abort the reboot at registration). SYSTEM authenticates to the status store share
+    # as the computer account, so the share must grant the farm machine accounts write access - see
+    # the wiki. This task is REQUIRED: without it nothing transitions the Reboot phase from Running
+    # to Done, so a failure to register aborts the reboot and is surfaced as Failed rather than
+    # leaving the dashboard stuck on Running forever.
     $confirmRegistered = $false
     try {
-        $rebootCredential = Get-SPSSecret -CredentialKey $envCfg.CredentialKey -ConfigPath $pathConfigFolder
-        if ($null -eq $rebootCredential) {
-            throw 'the InstallAccount secret could not be loaded to register the reboot-confirm task.'
-        }
         $confirmArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($resolvedConfigFile)`" -Action ConfirmReboot"
         $existingConfirm = Get-ScheduledTask -TaskName $script:TaskNameRebootConfirm -TaskPath "\$script:TaskPath\" -ErrorAction SilentlyContinue
         if ($null -ne $existingConfirm) {
@@ -705,7 +704,7 @@ function Invoke-SPSAutomaticReboot {
         Add-SPSScheduledTask -Name $script:TaskNameRebootConfirm `
             -Description 'One-shot SPSUpdate task that confirms the automatic reboot completed and self-deletes.' `
             -ActionArguments $confirmArguments `
-            -ExecuteAsCredential $rebootCredential `
+            -RunAsSystem `
             -TaskPath $script:TaskPath `
             -BootTrigger
         # Verify the task is actually registered before we commit to rebooting.
@@ -1039,7 +1038,8 @@ Exception: $_
                 $rebootDoneMarker = Get-SPSRebootMarkerPath -Kind 'done'
                 $campaignReachable = Test-Path -Path $statusCampaignPath -ErrorAction SilentlyContinue
                 if (-not $campaignReachable) {
-                    Write-Warning -Message "Status store campaign folder is unreachable on $thisServer; leaving the confirmation task to retry on the next boot."
+                    Write-Warning -Message ("Status store campaign folder is unreachable on $thisServer; leaving the confirmation task to retry on the next boot. " +
+                        "This boot task runs as SYSTEM, so it reaches a UNC status store as the computer account ($($env:COMPUTERNAME)`$) - make sure the share and NTFS grant the farm machine accounts (for example 'Domain Computers') write access. See the wiki.")
                 }
                 elseif ($null -eq $rebootDoneMarker -or -not (Test-Path -Path $rebootDoneMarker)) {
                     Write-Warning -Message "No reboot guard marker for the current campaign on $thisServer; this reboot-confirmation task is stale and will be removed without recording completion."

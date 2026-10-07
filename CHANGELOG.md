@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The one-shot `SPSUpdate-RebootConfirm` boot task (automatic reboot) now runs as **`NT AUTHORITY\SYSTEM`** instead of the farm InstallAccount decrypted from `secrets.psd1`. This removes the stored-credential dependency that could abort the reboot at task registration (`0x8007052E` when the secret did not match the account password) and decouples the reboot from password rotation. `Add-SPSScheduledTask` gains a `-RunAsSystem` switch (mutually exclusive with `-ExecuteAsCredential`). Because a `SYSTEM` task reaches a UNC status store as the computer account, the share must grant the farm computer accounts (e.g. `Domain Computers`) Modify — add them to `New-SPSDashboardSite.ps1 -WriteAccounts`; `-Action ConfirmReboot` logs a clear, actionable warning (and retries on the next boot) when the grant is missing. ([#64](https://github.com/luigilink/SPSUpdate/issues/64))
+
 ### Added
 
 - The near real-time dashboard now refreshes the live farm status at key transitions (the pre-patch baseline, after the Configuration Wizard completes, and the final render) instead of only at the pre-patch baseline. The master re-reads each server's patch status and re-publishes the content-database inventory with fresh upgrade status, so a successful campaign no longer shows a stale `Upgrade Required` Patch Status or a lingering pre-patch inconsistency banner once the farm is back to `No Action Required`. The Content Databases card also shows a database that SPSUpdate has already upgraded (State `Done`) as `No update pending` even before the next refresh. Server patch status and role are shown with short readable labels (for example `Upgrade Required`, `Application with Search`) via the new public helpers `ConvertTo-SPSPatchStatusLabel` and `ConvertTo-SPSRoleLabel`, instead of the raw enum names. ([#51](https://github.com/luigilink/SPSUpdate/issues/51))
