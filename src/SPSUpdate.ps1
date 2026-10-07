@@ -636,9 +636,9 @@ function Invoke-SPSAutomaticReboot {
     # not when this run itself needs a reboot (fresh -RebootRequired, or Force on a successful install).
     if ($hasPending -and -not $RebootRequired -and -not ($rebootCfg.Force -and $InstallPerformed)) {
         $pendingStamp = $null
-        try { $pendingStamp = [datetime]::Parse((Get-Content -Path $rebootPendingMarker -Raw).Trim(), $null, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $pendingStamp = $null }
+        try { $pendingStamp = [datetimeoffset]::Parse((Get-Content -Path $rebootPendingMarker -Raw).Trim(), [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).UtcDateTime } catch { $pendingStamp = $null }
         $lastBoot = $null
-        try { $lastBoot = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime } catch { $lastBoot = $null }
+        try { $lastBoot = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime() } catch { $lastBoot = $null }
         if ($null -ne $pendingStamp -and $null -ne $lastBoot -and $lastBoot -gt $pendingStamp) {
             Write-Output "Deferred reboot for $thisServer already satisfied out-of-band (last boot $lastBoot > request $pendingStamp); reconciling."
             if ($null -ne $rebootDoneMarker) { Set-Content -Path $rebootDoneMarker -Value (Get-Date -Format o) -Force -ErrorAction SilentlyContinue }
