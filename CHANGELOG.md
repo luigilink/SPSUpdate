@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The one-shot `SPSUpdate-RebootConfirm` boot task (automatic reboot) now runs as **`NT AUTHORITY\SYSTEM`** instead of the farm InstallAccount decrypted from `secrets.psd1`. This removes the stored-credential dependency that could abort the reboot at task registration (`0x8007052E` when the secret did not match the account password) and decouples the reboot from password rotation. `Add-SPSScheduledTask` gains a `-RunAsSystem` switch (mutually exclusive with `-ExecuteAsCredential`). Because a `SYSTEM` task reaches a UNC status store as the computer account, the share must grant the farm computer accounts (e.g. `Domain Computers`) Modify — add them to `New-SPSDashboardSite.ps1 -WriteAccounts`; `-Action ConfirmReboot` logs a clear, actionable warning (and retries on the next boot) when the grant is missing. ([#64](https://github.com/luigilink/SPSUpdate/issues/64))
+
 ### Added
 
 - `-Action ProductUpdate` now refreshes the installed server's live **Patch Status** on the Binaries Installation card after the cumulative update is installed, so the column reflects the real post-install state (typically `Upgrade Required` until the Configuration Wizard runs) instead of keeping the pre-install value (`No Action Required`) until the next `Default` run. It reuses the same master-side patch-status read as the `Default` baseline (no remoting) and is status-only — the Content Databases and Configuration Wizard cards still evolve only during a `Default` run. A failed read preserves the last-known-good value. ([#59](https://github.com/luigilink/SPSUpdate/issues/59))

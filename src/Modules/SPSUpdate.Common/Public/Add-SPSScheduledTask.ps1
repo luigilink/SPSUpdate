@@ -1,9 +1,14 @@
 ﻿function Add-SPSScheduledTask {
+    [CmdletBinding(DefaultParameterSetName = 'Credential')]
     param
     (
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Credential')]
         [System.Management.Automation.PSCredential]
         $ExecuteAsCredential, # Credentials for Task Schedule
+
+        [Parameter(ParameterSetName = 'System')]
+        [switch]
+        $RunAsSystem, # Register the task to run as NT AUTHORITY\SYSTEM (no stored credential)
 
         [Parameter(Mandatory = $true)]
         [System.String]
@@ -28,8 +33,11 @@
 
     # Initialize variables
     $TaskCmd = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' # Path to PowerShell executable
-    $UserName = $ExecuteAsCredential.UserName
-    $Password = $ExecuteAsCredential.GetNetworkCredential().Password
+    # A credential is only read for the password-based registration path (not for SYSTEM).
+    if (-not $RunAsSystem) {
+        $UserName = $ExecuteAsCredential.UserName
+        $Password = $ExecuteAsCredential.GetNetworkCredential().Password
+    }
 
     # Connect to the local TaskScheduler Service
     $TaskSvc = New-Object -ComObject ('Schedule.service')
@@ -60,6 +68,11 @@
     $TaskSchd.RegistrationInfo.Description = "$($Description)" # Task description
     $TaskSchd.RegistrationInfo.Author = $TaskAuthor # Task author
     $TaskSchd.Principal.RunLevel = 1 # Task run level (1 = Highest)
+    # SYSTEM uses the well-known SID with the service-account logon type (5), so no password.
+    if ($RunAsSystem) {
+        $TaskSchd.Principal.UserId = 'S-1-5-18'
+        $TaskSchd.Principal.LogonType = 5
+    }
 
     # Task Schedule - Modify Settings Section
     $TaskSettings = $TaskSchd.Settings
@@ -88,9 +101,14 @@
     }
 
     try {
-        # Register/update the task (6 = create or update). Cast to [void] so the
-        # returned RegisteredTask COM object is not dumped into the transcript.
-        [void]$TaskFolder.RegisterTaskDefinition($Name, $TaskSchd, 6, $TaskUser, $TaskUserPwd, 1)
+        # Register/update (6). SYSTEM registers with the service-account logon type (5); the
+        # credential path uses password logon (1). [void] keeps the COM object out of the transcript.
+        if ($RunAsSystem) {
+            [void]$TaskFolder.RegisterTaskDefinition($Name, $TaskSchd, 6, 'S-1-5-18', $null, 5)
+        }
+        else {
+            [void]$TaskFolder.RegisterTaskDefinition($Name, $TaskSchd, 6, $TaskUser, $TaskUserPwd, 1)
+        }
         Write-Output "Successfully added or updated '$Name' script in Task Scheduler Service"
     }
     catch {
