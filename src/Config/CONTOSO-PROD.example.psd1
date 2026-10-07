@@ -100,6 +100,12 @@
     # exit code (never by Windows pending-reboot registry markers, which stay stuck on
     # production farms). WARNING: reboots are per-server; on a farm you remain responsible
     # for not rebooting the sole Distributed Cache host or the last available WFE at once.
+    # NOTE: the boot task that confirms the reboot runs as NT AUTHORITY\SYSTEM, so each
+    # server writes its reboot completion to the status store as its computer account. When
+    # StatusStorePath / Dashboard.OutputPath is a UNC share, grant the farm computer accounts
+    # (e.g. 'CONTOSO\Domain Computers') Modify on the share and NTFS - see the "Hosting the
+    # dashboard on IIS" wiki page. Without that grant the reboot still happens but its
+    # completion is not recorded until the grant is added.
     Reboot                 = @{
         # Enable : allow SPSUpdate to reboot a server automatically after a CU install.
         # Possible values : $true | $false.   Default if omitted: $false

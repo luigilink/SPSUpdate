@@ -115,11 +115,34 @@ HTTP 404.17):
 | SMB share | Modify (Change) | the account that runs SPSUpdate interactively, and/or the InstallAccount |
 | NTFS | Modify | same account(s) |
 | NTFS | Read | the IIS application-pool identity (`IIS_IUSRS` by default) |
+| SMB share + NTFS | Modify | the farm **computer accounts** (e.g. `CONTOSO\Domain Computers`) — **only when the automatic reboot is enabled** (see below) |
 
 The four upgrade/mount sequence tasks run as the **InstallAccount**, so if it cannot write to
 the share the upgrade phase never appears on the dashboard. Run `Test-SPSUpdateReadiness.ps1`
 to verify both your account and the InstallAccount can write to the store, and that
 `Dashboard.OutputPath` exists, is writable, and is a shared UNC path.
+
+### Automatic reboot: grant the farm computer accounts
+
+The one-shot `SPSUpdate-RebootConfirm` boot task (registered when the optional automatic reboot
+runs) executes as **`NT AUTHORITY\SYSTEM`** so it needs no stored credential. On the network, a
+`SYSTEM` task authenticates as the **computer account** (`DOMAIN\SERVER$`), so each rebooting
+server must be able to write `Reboot=Done` to the UNC status store as its machine account.
+
+Grant the farm computer accounts **Modify** on both the SMB share and NTFS. The simplest option is
+to add `Domain Computers` (or the specific server `$` accounts) to `-WriteAccounts` when provisioning
+the share:
+
+```powershell
+.\New-SPSDashboardSite.ps1 -Path 'C:\inetpub\PSDSCPullServer\SPSUpdate' -ShareName 'SPSUpdate$' `
+    -WriteAccounts 'CONTOSO\svcspsfarm','CONTOSO\Domain Computers' `
+    -ParentSite 'PSDSCPullServer' -AppAlias 'SPSUpdate'
+```
+
+If the share does not grant the machine accounts, the CU still installs and the server still
+reboots, but `-Action ConfirmReboot` cannot persist the completion: it logs a clear warning and
+retries on the next boot, and the dashboard stays on the `Reboot` running state until the grant is
+added. This grant is only needed when the automatic reboot (`Reboot.Enable = $true`) is used.
 
 ## Point SPSUpdate at it
 

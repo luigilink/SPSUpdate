@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The one-shot `SPSUpdate-RebootConfirm` boot task (automatic reboot) now runs as **`NT AUTHORITY\SYSTEM`** instead of the farm InstallAccount decrypted from `secrets.psd1`. This removes the stored-credential dependency that could abort the reboot at task registration (`0x8007052E` when the secret did not match the account password) and decouples the reboot from password rotation. `Add-SPSScheduledTask` gains a `-RunAsSystem` switch (mutually exclusive with `-ExecuteAsCredential`). Because a `SYSTEM` task reaches a UNC status store as the computer account, the share must grant the farm computer accounts (e.g. `Domain Computers`) Modify — add them to `New-SPSDashboardSite.ps1 -WriteAccounts`; `-Action ConfirmReboot` logs a clear, actionable warning (and retries on the next boot) when the grant is missing. ([#64](https://github.com/luigilink/SPSUpdate/issues/64))
+
 ### Added
 
 - **SharePoint 2016 / 2019 compatibility restored on the `4.x` line.** This maintenance line keeps the full feature set of the `5.x` (Subscription Edition) line but re-introduces support for SharePoint Server 2016 and 2019: the SharePoint cmdlets are loaded through the legacy `Microsoft.SharePoint.PowerShell` snap-in on 2016/2019 (and the `SharePointServer` module on Subscription Edition), both locally and in remote sessions, and `Get-SPSLocalVersionInfo` is version-aware again (`2016`/`2019`/`SE`) so the correct product-name string is matched in the registry. SharePoint 2016, 2019 and Subscription Edition all share the same `16.0` hive and `OSearch16` search service, so no other paths change. Version detection is automatic at runtime (no configuration change). As an added safety check on this multi-version line, `Start-SPSProductUpdate` now compares the update package's product line (2016/2019/SE, derived from the CU build) with the installed SharePoint line and fails fast — before stopping any service or launching the installer — when they do not match. ([#38](https://github.com/luigilink/SPSUpdate/issues/38))
