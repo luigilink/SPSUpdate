@@ -632,9 +632,9 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
-    # Reconcile a deferred reboot already performed out-of-band: if the pending request predates
-    # the last boot, the required restart has happened (manual / Windows Update) - mark it Done.
-    if ($hasPending -and -not $RebootRequired) {
+    # Reconcile a deferred reboot already performed out-of-band (pending predates last boot), but
+    # not when this run itself needs a reboot (fresh -RebootRequired, or Force on a successful install).
+    if ($hasPending -and -not $RebootRequired -and -not ($rebootCfg.Force -and $InstallPerformed)) {
         $pendingStamp = $null
         try { $pendingStamp = [datetime]::Parse((Get-Content -Path $rebootPendingMarker -Raw).Trim(), $null, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $pendingStamp = $null }
         $lastBoot = $null
