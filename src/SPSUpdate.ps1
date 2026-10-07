@@ -1422,7 +1422,18 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
             else {
                 $puInstalledBuild = ''
                 try { $puInstalledBuild = (Get-SPSInstalledProductVersion).FileVersion.ToString() } catch { $puInstalledBuild = '' }
-                Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
+                # Refresh this server's live Patch Status only after a real install, so the card
+                # shows the post-install state (no-op runs keep the last-known-good value).
+                $puPatchStatus = ''
+                if ($installPerformed) {
+                    try { $puPatchStatus = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $thisServer)" } catch { $puPatchStatus = '' }
+                }
+                if ([string]::IsNullOrWhiteSpace($puPatchStatus)) {
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild
+                }
+                else {
+                    Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Done' -Detail 'All updates processed' -Build $puInstalledBuild -PatchStatus $puPatchStatus
+                }
             }
             Write-SPSDashboard
             # Optional automatic reboot (opt-in). No-op unless Reboot.Enable is set. When a
