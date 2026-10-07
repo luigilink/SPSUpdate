@@ -1416,14 +1416,8 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
             else {
                 $puInstalledBuild = ''
                 try { $puInstalledBuild = (Get-SPSInstalledProductVersion).FileVersion.ToString() } catch { $puInstalledBuild = '' }
-                # Refresh this server's live Patch Status on the Binaries card only when a CU was
-                # actually installed this run ($installPerformed = exit code 0/17022), so the column
-                # reflects the real post-install state (typically 'Upgrade Required' until the
-                # Configuration Wizard runs) instead of the pre-install value lingering until the next
-                # Default run. A no-op run (already installed, or a declined -Confirm) must not
-                # rewrite the stored PatchStatus. Same master-side read as the Default baseline (no
-                # remoting); the Content DB / Wizard cards are left to the Default run. A failed read
-                # leaves PatchStatus unset so the last-known-good value is preserved.
+                # Refresh this server's live Patch Status only after a real install, so the card
+                # shows the post-install state (no-op runs keep the last-known-good value).
                 $puPatchStatus = ''
                 if ($installPerformed) {
                     try { $puPatchStatus = ConvertTo-SPSPatchStatusLabel -Status "$(Get-SPSServersPatchStatus -Server $thisServer)" } catch { $puPatchStatus = '' }
