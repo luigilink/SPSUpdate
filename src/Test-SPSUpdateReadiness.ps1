@@ -293,11 +293,12 @@ else {
             Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (current user)' -Status 'FAIL' -Detail "Cannot write to $dashOutputPath : $($_.Exception.Message)"
         }
 
-        # Scheduled sequences and the boot-triggered ConfirmReboot render the dashboard AS the
-        # InstallAccount, so the current-user probe above is not enough. When OutputPath is a
-        # distinct folder from the status store (whose service-account write was already probed),
-        # probe it as the InstallAccount too, otherwise worker renders could fail while readiness
-        # passes.
+        # The scheduled upgrade/mount sequences render the dashboard AS the InstallAccount, so the
+        # current-user probe above is not enough. When OutputPath is a distinct folder from the
+        # status store (whose service-account write was already probed), probe it as the
+        # InstallAccount too, otherwise worker renders could fail while readiness passes.
+        # NOTE: the boot-triggered ConfirmReboot task runs as SYSTEM (computer account over the
+        # network), not the InstallAccount - that path is checked separately below.
         $storeForCompare = ''
         if ($null -ne $cfg -and $cfg.Contains('StatusStorePath')) { $storeForCompare = ([string]$cfg.StatusStorePath).TrimEnd('\', '/') }
         $dashForCompare = $dashOutputPath.TrimEnd('\', '/')
@@ -315,7 +316,7 @@ else {
                 Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'SKIP' -Detail 'Folder not found; see the failure above'
             }
             elseif ($null -eq $dashSvcCred) {
-                Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'WARN' -Detail 'Could not load the InstallAccount to test; ensure it has Modify on the dashboard folder (scheduled sequences and ConfirmReboot render as that account)'
+                Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'WARN' -Detail 'Could not load the InstallAccount to test; ensure it has Modify on the dashboard folder (the scheduled sequences render as that account)'
             }
             else {
                 $dashSvcProbe = Join-Path -Path $dashOutputPath -ChildPath (".spsupdate-readiness-svc-{0}.tmp" -f ([guid]::NewGuid().ToString('N')))
@@ -334,13 +335,31 @@ else {
                         Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'PASS' -Detail "InstallAccount '$($dashSvcCred.UserName)' can write to the dashboard folder"
                     }
                     else {
-                        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'FAIL' -Detail "InstallAccount '$($dashSvcCred.UserName)' cannot write to $dashOutputPath. Grant it Modify; otherwise worker renders (sequences, ConfirmReboot) will not update the hosted dashboard."
+                        Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'FAIL' -Detail "InstallAccount '$($dashSvcCred.UserName)' cannot write to $dashOutputPath. Grant it Modify; otherwise worker renders (sequences) will not update the hosted dashboard."
                     }
                 }
                 catch {
                     Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (service account)' -Status 'WARN' -Detail "Could not launch a probe as '$($dashSvcCred.UserName)' ($($_.Exception.Message)). Verify it has 'Log on as a batch job' and Modify on the dashboard folder."
                 }
             }
+        }
+    }
+
+    # When the automatic reboot is enabled and the status store is a UNC share, the boot-triggered
+    # ConfirmReboot task runs as SYSTEM and writes to the share as the computer account - which the
+    # share must grant Modify. We cannot probe a machine-account write from here, so surface an
+    # explicit WARN with the required grant rather than let readiness pass silently.
+    $rebootEnabled = $false
+    try { $rebootEnabled = [bool]$cfg.Reboot.Enable } catch { $rebootEnabled = $false }
+    $storeForReboot = ''
+    try { $storeForReboot = [string]$cfg.StatusStorePath } catch { $storeForReboot = '' }
+    if ([string]::IsNullOrWhiteSpace($storeForReboot)) { $storeForReboot = $dashOutputPath }
+    if ($rebootEnabled) {
+        if ($storeForReboot -like '\\*') {
+            Add-CheckResult -Section 'Dashboard' -Name 'Reboot status store (machine accounts)' -Status 'WARN' -Detail "Automatic reboot is enabled: the boot ConfirmReboot task runs as SYSTEM and writes to '$storeForReboot' as the computer account. Grant the farm machine accounts (e.g. 'Domain Computers') Modify on the share + NTFS (add them to New-SPSDashboardSite.ps1 -WriteAccounts). This cannot be auto-verified here."
+        }
+        else {
+            Add-CheckResult -Section 'Dashboard' -Name 'Reboot status store (machine accounts)' -Status 'WARN' -Detail 'Automatic reboot is enabled but the status store is a local path; the boot ConfirmReboot task (SYSTEM) on other servers cannot reach it. Use a shared UNC status store and grant the farm machine accounts Modify.'
         }
     }
 }

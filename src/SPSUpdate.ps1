@@ -1067,8 +1067,9 @@ Exception: $_
                         Add-SPSUpdateEvent -Message "Automatic reboot completed on $thisServer - server is back online." -Source 'Restart-SPSServer' -EntryType 'Information' -EventID 3010
                     }
                     else {
-                        Write-Warning -Message "Could not persist Reboot=Done for $thisServer after several attempts; leaving the confirmation task in place to retry on the next boot."
-                        Add-SPSUpdateEvent -Message "Could not persist the reboot completion status for $thisServer; the confirmation task will retry on the next boot." -Source 'Restart-SPSServer' -EntryType 'Warning'
+                        Write-Warning -Message ("Could not persist Reboot=Done for $thisServer after several attempts; leaving the confirmation task in place to retry on the next boot. " +
+                            "This boot task runs as SYSTEM, so it writes to a UNC status store as the computer account ($($env:COMPUTERNAME)`$) - make sure the share and NTFS grant the farm machine accounts (for example 'Domain Computers') Modify, not just read. See the wiki.")
+                        Add-SPSUpdateEvent -Message "Could not persist the reboot completion status for $thisServer; the confirmation task will retry on the next boot. The SYSTEM boot task writes as the computer account - grant the farm machine accounts Modify on the status store share and NTFS." -Source 'Restart-SPSServer' -EntryType 'Warning'
                     }
                 }
             }
