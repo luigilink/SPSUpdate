@@ -687,13 +687,8 @@ function Invoke-SPSAutomaticReboot {
         return
     }
 
-    # Register the one-shot boot-triggered confirmation task. It runs as SYSTEM so it needs no
-    # stored credential (removing the DPAPI-secret dependency and the per-server password coupling
-    # that could abort the reboot at registration). SYSTEM authenticates to the status store share
-    # as the computer account, so the share must grant the farm machine accounts write access - see
-    # the wiki. This task is REQUIRED: without it nothing transitions the Reboot phase from Running
-    # to Done, so a failure to register aborts the reboot and is surfaced as Failed rather than
-    # leaving the dashboard stuck on Running forever.
+    # Register the one-shot boot task as SYSTEM (no stored credential). REQUIRED: without it the
+    # Reboot phase never reaches Done, so a registration failure aborts the reboot (surfaced Failed).
     $confirmRegistered = $false
     try {
         $confirmArguments = "-ExecutionPolicy Bypass -File `"$($fullScriptPath)`" -ConfigFile `"$($resolvedConfigFile)`" -Action ConfirmReboot"

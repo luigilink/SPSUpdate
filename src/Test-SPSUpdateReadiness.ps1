@@ -293,12 +293,8 @@ else {
             Add-CheckResult -Section 'Dashboard' -Name 'Dashboard.OutputPath writable (current user)' -Status 'FAIL' -Detail "Cannot write to $dashOutputPath : $($_.Exception.Message)"
         }
 
-        # The scheduled upgrade/mount sequences render the dashboard AS the InstallAccount, so the
-        # current-user probe above is not enough. When OutputPath is a distinct folder from the
-        # status store (whose service-account write was already probed), probe it as the
-        # InstallAccount too, otherwise worker renders could fail while readiness passes.
-        # NOTE: the boot-triggered ConfirmReboot task runs as SYSTEM (computer account over the
-        # network), not the InstallAccount - that path is checked separately below.
+        # The sequence tasks render as the InstallAccount, so probe the dashboard folder as that
+        # account too. (ConfirmReboot runs as SYSTEM - that path is checked separately below.)
         $storeForCompare = ''
         if ($null -ne $cfg -and $cfg.Contains('StatusStorePath')) { $storeForCompare = ([string]$cfg.StatusStorePath).TrimEnd('\', '/') }
         $dashForCompare = $dashOutputPath.TrimEnd('\', '/')
@@ -345,10 +341,8 @@ else {
         }
     }
 
-    # When the automatic reboot is enabled and the status store is a UNC share, the boot-triggered
-    # ConfirmReboot task runs as SYSTEM and writes to the share as the computer account - which the
-    # share must grant Modify. We cannot probe a machine-account write from here, so surface an
-    # explicit WARN with the required grant rather than let readiness pass silently.
+    # Reboot enabled + UNC store: the SYSTEM boot task writes as the computer account, which we
+    # cannot probe here - surface an explicit WARN about the required machine-account grant.
     $rebootEnabled = $false
     try { $rebootEnabled = [bool]$cfg.Reboot.Enable } catch { $rebootEnabled = $false }
     $storeForReboot = ''
