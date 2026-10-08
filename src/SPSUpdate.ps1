@@ -150,16 +150,28 @@ function Get-SPSUpdateConfiguration {
     if (-not $config.Binaries.ContainsKey('ProductUpdate')) {
         $config.Binaries.ProductUpdate = $true
     }
+    else {
+        $config.Binaries.ProductUpdate = ConvertTo-SPSConfigBoolean -Value $config.Binaries.ProductUpdate -PropertyName 'Binaries.ProductUpdate'
+    }
     if (-not $config.Binaries.ContainsKey('ShutdownServices')) {
         $config.Binaries.ShutdownServices = $true
+    }
+    else {
+        $config.Binaries.ShutdownServices = ConvertTo-SPSConfigBoolean -Value $config.Binaries.ShutdownServices -PropertyName 'Binaries.ShutdownServices'
     }
 
     # Apply content-database defaults
     if (-not $config.ContainsKey('MountContentDatabase')) {
         $config.MountContentDatabase = $false
     }
+    else {
+        $config.MountContentDatabase = ConvertTo-SPSConfigBoolean -Value $config.MountContentDatabase -PropertyName 'MountContentDatabase'
+    }
     if (-not $config.ContainsKey('UpgradeContentDatabase')) {
         $config.UpgradeContentDatabase = $true
+    }
+    else {
+        $config.UpgradeContentDatabase = ConvertTo-SPSConfigBoolean -Value $config.UpgradeContentDatabase -PropertyName 'UpgradeContentDatabase'
     }
 
     # Normalize the SideBySideToken block and apply defaults
@@ -168,6 +180,9 @@ function Get-SPSUpdateConfiguration {
     }
     if (-not $config.SideBySideToken.ContainsKey('Enable')) {
         $config.SideBySideToken.Enable = $false
+    }
+    else {
+        $config.SideBySideToken.Enable = ConvertTo-SPSConfigBoolean -Value $config.SideBySideToken.Enable -PropertyName 'SideBySideToken.Enable'
     }
     if (-not $config.SideBySideToken.ContainsKey('BuildVersion')) {
         $config.SideBySideToken.BuildVersion = ''
@@ -182,14 +197,14 @@ function Get-SPSUpdateConfiguration {
     if (-not $config.Reboot.ContainsKey('Enable')) {
         $config.Reboot.Enable = $false
     }
-    elseif ($config.Reboot.Enable -isnot [bool]) {
-        throw "Configuration property 'Reboot.Enable' must be a Boolean (`$true or `$false), not '$($config.Reboot.Enable)'."
+    else {
+        $config.Reboot.Enable = ConvertTo-SPSConfigBoolean -Value $config.Reboot.Enable -PropertyName 'Reboot.Enable'
     }
     if (-not $config.Reboot.ContainsKey('Force')) {
         $config.Reboot.Force = $false
     }
-    elseif ($config.Reboot.Force -isnot [bool]) {
-        throw "Configuration property 'Reboot.Force' must be a Boolean (`$true or `$false), not '$($config.Reboot.Force)'."
+    else {
+        $config.Reboot.Force = ConvertTo-SPSConfigBoolean -Value $config.Reboot.Force -PropertyName 'Reboot.Force'
     }
 
     # Remote cmdlets use CredSSP by default; Remoting.AllowFallback (opt-in, off) lets
@@ -200,8 +215,8 @@ function Get-SPSUpdateConfiguration {
     if (-not $config.Remoting.ContainsKey('AllowFallback')) {
         $config.Remoting.AllowFallback = $false
     }
-    elseif ($config.Remoting.AllowFallback -isnot [bool]) {
-        throw "Configuration property 'Remoting.AllowFallback' must be a Boolean (`$true or `$false), not '$($config.Remoting.AllowFallback)'."
+    else {
+        $config.Remoting.AllowFallback = ConvertTo-SPSConfigBoolean -Value $config.Remoting.AllowFallback -PropertyName 'Remoting.AllowFallback'
     }
 
     # Execution.InteractiveSequences (opt-in, off): in an attended run, launch the parallel
@@ -212,8 +227,8 @@ function Get-SPSUpdateConfiguration {
     if (-not $config.Execution.ContainsKey('InteractiveSequences')) {
         $config.Execution.InteractiveSequences = $false
     }
-    elseif ($config.Execution.InteractiveSequences -isnot [bool]) {
-        throw "Configuration property 'Execution.InteractiveSequences' must be a Boolean (`$true or `$false), not '$($config.Execution.InteractiveSequences)'."
+    else {
+        $config.Execution.InteractiveSequences = ConvertTo-SPSConfigBoolean -Value $config.Execution.InteractiveSequences -PropertyName 'Execution.InteractiveSequences'
     }
 
     # StatusStorePath is optional; empty string means "use the local Results\status folder".
