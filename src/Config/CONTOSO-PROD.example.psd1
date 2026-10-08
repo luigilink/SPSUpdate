@@ -62,7 +62,7 @@
     # --- Binaries (REQUIRED block; used by -Action ProductUpdate) ---------------------
     Binaries               = @{
         # ProductUpdate : allow the binary installation step.
-        # Possible values : $true | $false.   Default if omitted: $true
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $true
         ProductUpdate    = $true
 
         # SetupFullPath : folder (local to each server) that holds the update binaries.
@@ -80,7 +80,7 @@
 
         # ShutdownServices : stop Search/Timer/IIS services during install to speed it up
         # (they are restored to their prior state afterwards).
-        # Possible values : $true | $false.   Default if omitted: $true
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $true
         ShutdownServices = $true
 
         # Schedule : OPTIONAL window restricting WHEN the binary install may run. Omit to
@@ -108,12 +108,12 @@
     # completion is not recorded until the grant is added.
     Reboot                 = @{
         # Enable : allow SPSUpdate to reboot a server automatically after a CU install.
-        # Possible values : $true | $false.   Default if omitted: $false
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $false
         Enable   = $false
 
         # Force : reboot even when the installer did not request one (exit code 0). Leave
         # $false to reboot strictly when a reboot was required (exit code 17022).
-        # Possible values : $true | $false.   Default if omitted: $false
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $false
         Force    = $false
 
         # Schedule : OPTIONAL window restricting WHEN a reboot may happen (same shape as
@@ -129,17 +129,17 @@
     # MountContentDatabase : mount the databases listed in the generated ContentDB
     # inventory (typically for a SP2019 -> Subscription Edition migration). When either
     # this or UpgradeContentDatabase is $true, the inventory JSON is (re)built on run.
-    # Possible values : $true | $false.   Default if omitted: $false
+    # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $false
     MountContentDatabase   = $false
 
     # UpgradeContentDatabase : run Upgrade-SPContentDatabase on databases that NeedsUpgrade.
-    # Possible values : $true | $false.   Default if omitted: $true
+    # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $true
     UpgradeContentDatabase = $true
 
     # --- Side-by-side patching (OPTIONAL block) --------------------------------------
     SideBySideToken        = @{
         # Enable : turn EnableSideBySide on the web applications and copy side-by-side files.
-        # Possible values : $true | $false.   Default if omitted: $false
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $false
         Enable       = $false
 
         # BuildVersion : the side-by-side token build. Leave empty to skip token config.
@@ -155,7 +155,7 @@
         # delegate the credential, so steps that need a second hop (config DB on SQL, or a
         # binaries file share) may fail unless Kerberos delegation (KCD/RBCD) is configured.
         # Leave off for secure, strict environments.
-        # Possible values : $true | $false.   Default if omitted: $false
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $false
         AllowFallback = $false
     }
 
@@ -165,7 +165,7 @@
         # parallel content-database sequences in visible PowerShell windows instead of hidden
         # scheduled tasks, so you can watch per-sequence progress live. Unattended/scheduled
         # runs always use scheduled tasks regardless of this setting.
-        # Possible values : $true | $false.   Default if omitted: $false
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $false
         InteractiveSequences = $false
     }
 }

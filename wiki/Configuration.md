@@ -64,6 +64,13 @@ If an optional key is omitted, SPSUpdate applies a safe default:
 `Binaries.SetupFullPath` and `Binaries.SetupFileName` are required as soon as
 `ProductUpdate` is `$true`.
 
+> **Boolean switches.** Every Boolean configuration switch — `Binaries.ProductUpdate`,
+> `Binaries.ShutdownServices`, `UpgradeContentDatabase`, `MountContentDatabase`,
+> `SideBySideToken.Enable`, `Reboot.Enable`, `Reboot.Force`, `Remoting.AllowFallback`
+> and `Execution.InteractiveSequences` — accepts `$true` / `$false` **or** the integers
+> `1` / `0` (`1` = `$true`, `0` = `$false`). Any other value (an out-of-range number, or a
+> string such as `'yes'` or `'false'`) is rejected with a clear error naming the property.
+
 > The previous JSON `StoredCredential` key has been renamed to `CredentialKey`, and the
 > configuration format moved from JSON to psd1. Runtime/output files (the ContentDB
 > inventory and logs) stay JSON by design.
