@@ -346,7 +346,14 @@ else {
 # Reboot enabled + UNC store: the SYSTEM boot task writes as the computer account, which we
 # cannot probe here - surface an explicit WARN about the required machine-account grant.
 $rebootEnabled = $false
-try { $rebootEnabled = ConvertTo-SPSConfigBoolean -Value $cfg.Reboot.Enable -PropertyName 'Reboot.Enable' } catch { $rebootEnabled = $false }
+if ($null -ne $cfg -and $cfg.Contains('Reboot') -and $cfg.Reboot -and $cfg.Reboot.Contains('Enable')) {
+    try {
+        $rebootEnabled = ConvertTo-SPSConfigBoolean -Value $cfg.Reboot.Enable -PropertyName 'Reboot.Enable'
+    }
+    catch {
+        Add-CheckResult -Section 'Dashboard' -Name 'Reboot.Enable' -Status 'FAIL' -Detail $_.Exception.Message
+    }
+}
 if ($rebootEnabled) {
     $storeForReboot = ''
     try { $storeForReboot = [string]$cfg.StatusStorePath } catch { $storeForReboot = '' }
