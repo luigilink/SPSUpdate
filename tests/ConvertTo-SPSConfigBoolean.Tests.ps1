@@ -32,6 +32,17 @@ Describe 'ConvertTo-SPSConfigBoolean' {
             $result | Should -BeOfType [System.Boolean]
             $result | Should -BeFalse
         }
+
+        It 'accepts other integral types valued 1 (byte, uint16, uint64)' {
+            ConvertTo-SPSConfigBoolean -Value ([byte]1) -PropertyName 'Reboot.Enable' | Should -BeTrue
+            ConvertTo-SPSConfigBoolean -Value ([uint16]1) -PropertyName 'Reboot.Enable' | Should -BeTrue
+            ConvertTo-SPSConfigBoolean -Value ([uint64]1) -PropertyName 'Reboot.Enable' | Should -BeTrue
+        }
+
+        It 'accepts other integral types valued 0 (sbyte, uint32)' {
+            ConvertTo-SPSConfigBoolean -Value ([sbyte]0) -PropertyName 'Reboot.Enable' | Should -BeFalse
+            ConvertTo-SPSConfigBoolean -Value ([uint32]0) -PropertyName 'Reboot.Enable' | Should -BeFalse
+        }
     }
 
     Context 'Rejected values' {

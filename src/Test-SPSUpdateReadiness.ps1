@@ -346,7 +346,7 @@ else {
 # Reboot enabled + UNC store: the SYSTEM boot task writes as the computer account, which we
 # cannot probe here - surface an explicit WARN about the required machine-account grant.
 $rebootEnabled = $false
-try { $rebootEnabled = [bool]$cfg.Reboot.Enable } catch { $rebootEnabled = $false }
+try { $rebootEnabled = ConvertTo-SPSConfigBoolean -Value $cfg.Reboot.Enable -PropertyName 'Reboot.Enable' } catch { $rebootEnabled = $false }
 if ($rebootEnabled) {
     $storeForReboot = ''
     try { $storeForReboot = [string]$cfg.StatusStorePath } catch { $storeForReboot = '' }
@@ -415,14 +415,14 @@ elseif ($null -ne $cfg -and $cfg.Contains('Domain') -and $cfg.Domain) {
     }
 
     # Remoting.AllowFallback is read raw here; default to the secure $false and reject a
-    # non-Boolean value (which Get-SPSUpdateConfiguration also rejects at run time).
+    # non-Boolean value the same way Get-SPSUpdateConfiguration does at run time.
     $allowFallback = $false
     if ($null -ne $cfg -and $cfg.Contains('Remoting') -and $cfg.Remoting -and $cfg.Remoting.Contains('AllowFallback')) {
-        if ($cfg.Remoting.AllowFallback -is [bool]) {
-            $allowFallback = $cfg.Remoting.AllowFallback
+        try {
+            $allowFallback = ConvertTo-SPSConfigBoolean -Value $cfg.Remoting.AllowFallback -PropertyName 'Remoting.AllowFallback'
         }
-        else {
-            Add-CheckResult -Section 'Network' -Name 'Remoting.AllowFallback' -Status 'FAIL' -Detail "Must be a Boolean (`$true/`$false); the run will reject '$($cfg.Remoting.AllowFallback)'"
+        catch {
+            Add-CheckResult -Section 'Network' -Name 'Remoting.AllowFallback' -Status 'FAIL' -Detail $_.Exception.Message
         }
     }
 

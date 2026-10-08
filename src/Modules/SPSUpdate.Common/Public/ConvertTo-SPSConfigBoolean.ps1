@@ -45,11 +45,11 @@
         return $Value
     }
 
-    # Accept only genuine integer types valued 0 or 1; the -is guard keeps strings
-    # like '0'/'1' out (otherwise '0' -eq 0 would match via string coercion).
-    if (($Value -is [int] -or $Value -is [long] -or $Value -is [int16] -or $Value -is [byte]) -and
-        ($Value -eq 0 -or $Value -eq 1)) {
-        return [System.Boolean][int]$Value
+    # Accept any integral type valued 0 or 1; the type guard keeps strings like '0'/'1'
+    # out (otherwise '0' -eq 0 would match via PowerShell string coercion).
+    $integralTypes = @([byte], [sbyte], [int16], [uint16], [int32], [uint32], [int64], [uint64])
+    if (($null -ne $Value) -and ($Value.GetType() -in $integralTypes) -and ($Value -eq 0 -or $Value -eq 1)) {
+        return [System.Boolean][int64]$Value
     }
 
     throw "Configuration property '$PropertyName' must be a Boolean (`$true/`$false) or 0/1, not '$Value'."
