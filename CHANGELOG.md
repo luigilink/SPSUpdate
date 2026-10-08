@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-10-08
+
 ### Changed
 
 - All Boolean configuration switches now accept `$true`/`$false` **and** `1`/`0`, and reject every other value with a clear error naming the property. Previously the `Reboot`, `Remoting` and `Execution` switches (`Reboot.Enable`, `Reboot.Force`, `Remoting.AllowFallback`, `Execution.InteractiveSequences`) enforced a strict `[bool]` type and threw on `1`, while the older flags (`Binaries.ProductUpdate`, `Binaries.ShutdownServices`, `MountContentDatabase`, `UpgradeContentDatabase`, `SideBySideToken.Enable`) silently coerced any truthy value (so `1` worked but so did a typo like `'false'`, which evaluates to `$true`). A shared `ConvertTo-SPSConfigBoolean` helper now validates and normalizes every switch consistently. ([#76](https://github.com/luigilink/SPSUpdate/issues/76))
