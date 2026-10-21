@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `Set-SPSSideBySideToken` now retries transient SharePoint `SPWebService.Update()` conflicts with a bounded policy (6 attempts, 15 seconds between attempts) instead of failing on the first race with concurrent `PSCONFIG` writes. The retry is conflict-specific: non-conflict errors still fail fast, and a conflict that persists through the budget is surfaced as a failure. ([#79](https://github.com/luigilink/SPSUpdate/issues/79))
+
 ## [5.3.0] - 2026-10-08
 
 ### Changed

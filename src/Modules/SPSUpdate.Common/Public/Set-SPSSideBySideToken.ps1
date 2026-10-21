@@ -11,6 +11,43 @@
         $EnableSideBySide
     )
 
+    $maxUpdateConflictAttempts = 6
+    $updateConflictRetryDelaySeconds = 15
+
+    function Invoke-SPSWebServiceUpdateWithRetry {
+        param
+        (
+            [Parameter(Mandatory = $true)]
+            $WebService,
+
+            [Parameter(Mandatory = $true)]
+            [System.String]
+            $Operation,
+
+            [Parameter(Mandatory = $true)]
+            [System.String]
+            $TargetName
+        )
+
+        $attempt = 0
+        while ($true) {
+            $attempt++
+            try {
+                $WebService.Update()
+                return
+            }
+            catch {
+                $isConflict = $_.Exception.Message -match '(?i)update conflict has occurred'
+                if (-not $isConflict -or $attempt -ge $maxUpdateConflictAttempts) {
+                    throw
+                }
+
+                Write-Warning "SPWebService update conflict during '$Operation' on '$TargetName' (attempt $attempt/$maxUpdateConflictAttempts). Retrying in $updateConflictRetryDelaySeconds seconds."
+                Start-Sleep -Seconds $updateConflictRetryDelaySeconds
+            }
+        }
+    }
+
     $webApps = Get-SPWebApplication -ErrorAction SilentlyContinue
     if ($null -ne $webApps) {
         foreach ($webApp in $webApps) {
@@ -23,7 +60,7 @@
                     Write-Output "Enabling EnableSideBySide on $spWebAppName Web Application"
                     if ($PSCmdlet.ShouldProcess($spWebAppName, 'Enable SharePoint side-by-side mode')) {
                         $webApp.WebService.EnableSideBySide = $true
-                        $webApp.WebService.Update()
+                        Invoke-SPSWebServiceUpdateWithRetry -WebService $webApp.WebService -Operation 'EnableSideBySide' -TargetName $spWebAppName
                     }
                 }
                 if ($webApp.WebService.SideBySideToken -eq $BuildVersion) {
@@ -33,7 +70,7 @@
                     Write-Output "Enabling SideBySideToken $BuildVersion on $spWebAppName Web Application"
                     if ($PSCmdlet.ShouldProcess($spWebAppName, "Set SharePoint SideBySideToken to $BuildVersion")) {
                         $webApp.WebService.SideBySideToken = $BuildVersion
-                        $webApp.WebService.Update()
+                        Invoke-SPSWebServiceUpdateWithRetry -WebService $webApp.WebService -Operation 'Set SideBySideToken' -TargetName $spWebAppName
                     }
                 }
                 Write-Output 'Running CmdLet Copy-SPSideBySideFiles'
@@ -46,7 +83,7 @@
                     Write-Output "Disabling EnableSideBySide on $spWebAppName Web Application"
                     if ($PSCmdlet.ShouldProcess($spWebAppName, 'Disable SharePoint side-by-side mode')) {
                         $webApp.WebService.EnableSideBySide = $false
-                        $webApp.WebService.Update()
+                        Invoke-SPSWebServiceUpdateWithRetry -WebService $webApp.WebService -Operation 'DisableSideBySide' -TargetName $spWebAppName
                     }
                 }
                 else {
