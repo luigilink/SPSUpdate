@@ -163,4 +163,98 @@ Describe 'Set-SPSSideBySideToken - bounded retry on update conflict' {
         Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 1 -Exactly -ParameterFilter { $Seconds -eq 15 }
         $script:CopyCalls | Should -Be 1
     }
+
+    Context 'enable/disable mode transition callbacks' {
+        It 'retries and succeeds when enabling side-by-side mode hits a transient conflict' {
+            $webApp = New-TestWebApp -EnableSideBySide $false -SideBySideToken '16.0.20326.20190' -FailCount 2 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+            $script:WebApps = @($webApp)
+            $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
+
+            Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
+
+            { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false } |
+                Should -Not -Throw
+
+            $webApp.WebService.AttemptCount | Should -Be 3
+            $webApp.WebService.EnableSideBySide | Should -BeTrue
+            Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 2 -Exactly -ParameterFilter { $Seconds -eq 15 }
+            $script:CopyCalls | Should -Be 1
+        }
+
+        It 'fails after 6 attempts when enabling side-by-side mode keeps conflicting' {
+            $webApp = New-TestWebApp -EnableSideBySide $false -SideBySideToken '16.0.20326.20190' -FailCount 99 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+            $script:WebApps = @($webApp)
+            $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
+
+            Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
+
+            { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false } |
+                Should -Throw -ExpectedMessage '*update conflict has occurred*'
+
+            $webApp.WebService.AttemptCount | Should -Be 6
+            Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 5 -Exactly -ParameterFilter { $Seconds -eq 15 }
+            $script:CopyCalls | Should -Be 0
+        }
+
+        It 'does not retry non-conflict errors when enabling side-by-side mode' {
+            $webApp = New-TestWebApp -EnableSideBySide $false -SideBySideToken '16.0.20326.20190' -FailCount 1 -ErrorMessage 'Access denied.'
+            $script:WebApps = @($webApp)
+            $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
+
+            Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
+
+            { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false } |
+                Should -Throw -ExpectedMessage '*Access denied*'
+
+            $webApp.WebService.AttemptCount | Should -Be 1
+            Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 0 -Exactly
+            $script:CopyCalls | Should -Be 0
+        }
+
+        It 'retries and succeeds when disabling side-by-side mode hits a transient conflict' {
+            $webApp = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.20326.20190' -FailCount 2 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+            $script:WebApps = @($webApp)
+            $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
+
+            Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
+
+            { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $false -Confirm:$false } |
+                Should -Not -Throw
+
+            $webApp.WebService.AttemptCount | Should -Be 3
+            $webApp.WebService.EnableSideBySide | Should -BeFalse
+            Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 2 -Exactly -ParameterFilter { $Seconds -eq 15 }
+            $script:CopyCalls | Should -Be 0
+        }
+
+        It 'fails after 6 attempts when disabling side-by-side mode keeps conflicting' {
+            $webApp = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.20326.20190' -FailCount 99 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+            $script:WebApps = @($webApp)
+            $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
+
+            Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
+
+            { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $false -Confirm:$false } |
+                Should -Throw -ExpectedMessage '*update conflict has occurred*'
+
+            $webApp.WebService.AttemptCount | Should -Be 6
+            Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 5 -Exactly -ParameterFilter { $Seconds -eq 15 }
+            $script:CopyCalls | Should -Be 0
+        }
+
+        It 'does not retry non-conflict errors when disabling side-by-side mode' {
+            $webApp = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.20326.20190' -FailCount 1 -ErrorMessage 'Access denied.'
+            $script:WebApps = @($webApp)
+            $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
+
+            Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
+
+            { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $false -Confirm:$false } |
+                Should -Throw -ExpectedMessage '*Access denied*'
+
+            $webApp.WebService.AttemptCount | Should -Be 1
+            Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 0 -Exactly
+            $script:CopyCalls | Should -Be 0
+        }
+    }
 }
