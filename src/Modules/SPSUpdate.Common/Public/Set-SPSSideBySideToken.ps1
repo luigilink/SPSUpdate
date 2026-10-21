@@ -18,7 +18,8 @@
         param
         (
             [Parameter(Mandatory = $true)]
-            $WebService,
+            [System.String]
+            $WebAppName,
 
             [Parameter(Mandatory = $true)]
             [System.String]
@@ -26,15 +27,25 @@
 
             [Parameter(Mandatory = $true)]
             [System.String]
-            $TargetName
+            $TargetName,
+
+            [Parameter(Mandatory = $true)]
+            [ScriptBlock]
+            $ApplyChange
         )
 
         $attempt = 0
         while ($true) {
             $attempt++
             try {
-                $WebService.Update()
-                return
+                $currentWebApp = Get-SPWebApplication -Identity $WebAppName -ErrorAction SilentlyContinue
+                if ($null -eq $currentWebApp -or $null -eq $currentWebApp.WebService) {
+                    throw "Could not refresh SPWebApplication '$WebAppName' before '$Operation'."
+                }
+
+                & $ApplyChange $currentWebApp.WebService
+                $currentWebApp.WebService.Update()
+                return $currentWebApp
             }
             catch {
                 $isConflict = $_.Exception.Message -match '(?i)update conflict has occurred'
@@ -52,25 +63,30 @@
     if ($null -ne $webApps) {
         foreach ($webApp in $webApps) {
             $spWebAppName = $webApp.Name
+            $currentWebApp = $webApp
             if ($EnableSideBySide) {
-                if ($webApp.WebService.EnableSideBySide) {
+                if ($currentWebApp.WebService.EnableSideBySide) {
                     Write-Output "EnableSideBySide is already enabled on $spWebAppName Web Application"
                 }
                 else {
                     Write-Output "Enabling EnableSideBySide on $spWebAppName Web Application"
                     if ($PSCmdlet.ShouldProcess($spWebAppName, 'Enable SharePoint side-by-side mode')) {
-                        $webApp.WebService.EnableSideBySide = $true
-                        Invoke-SPSWebServiceUpdateWithRetry -WebService $webApp.WebService -Operation 'EnableSideBySide' -TargetName $spWebAppName
+                        $currentWebApp = Invoke-SPSWebServiceUpdateWithRetry -WebAppName $spWebAppName -Operation 'EnableSideBySide' -TargetName $spWebAppName -ApplyChange {
+                            param($webService)
+                            $webService.EnableSideBySide = $true
+                        }
                     }
                 }
-                if ($webApp.WebService.SideBySideToken -eq $BuildVersion) {
+                if ($currentWebApp.WebService.SideBySideToken -eq $BuildVersion) {
                     Write-Output "SideBySideToken $BuildVersion is already enabled on $spWebAppName Web Application"
                 }
                 else {
                     Write-Output "Enabling SideBySideToken $BuildVersion on $spWebAppName Web Application"
                     if ($PSCmdlet.ShouldProcess($spWebAppName, "Set SharePoint SideBySideToken to $BuildVersion")) {
-                        $webApp.WebService.SideBySideToken = $BuildVersion
-                        Invoke-SPSWebServiceUpdateWithRetry -WebService $webApp.WebService -Operation 'Set SideBySideToken' -TargetName $spWebAppName
+                        $currentWebApp = Invoke-SPSWebServiceUpdateWithRetry -WebAppName $spWebAppName -Operation 'Set SideBySideToken' -TargetName $spWebAppName -ApplyChange {
+                            param($webService)
+                            $webService.SideBySideToken = $BuildVersion
+                        }
                     }
                 }
                 Write-Output 'Running CmdLet Copy-SPSideBySideFiles'
@@ -79,11 +95,13 @@
                 }
             }
             else {
-                if ($webApp.WebService.EnableSideBySide) {
+                if ($currentWebApp.WebService.EnableSideBySide) {
                     Write-Output "Disabling EnableSideBySide on $spWebAppName Web Application"
                     if ($PSCmdlet.ShouldProcess($spWebAppName, 'Disable SharePoint side-by-side mode')) {
-                        $webApp.WebService.EnableSideBySide = $false
-                        Invoke-SPSWebServiceUpdateWithRetry -WebService $webApp.WebService -Operation 'DisableSideBySide' -TargetName $spWebAppName
+                        $currentWebApp = Invoke-SPSWebServiceUpdateWithRetry -WebAppName $spWebAppName -Operation 'DisableSideBySide' -TargetName $spWebAppName -ApplyChange {
+                            param($webService)
+                            $webService.EnableSideBySide = $false
+                        }
                     }
                 }
                 else {

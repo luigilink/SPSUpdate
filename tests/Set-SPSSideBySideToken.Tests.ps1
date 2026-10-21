@@ -4,9 +4,9 @@
 BeforeAll {
     $repoRoot = Split-Path -Path $PSScriptRoot -Parent
     $modulePath = Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/SPSUpdate.Common.psd1'
-    Import-Module -name $modulePath -Force
+    Import-Module -Name $modulePath -Force
 
-    function new-TestWebApp {
+    function New-TestWebApp {
         param
         (
             [Parameter(Mandatory = $true)]
@@ -27,13 +27,14 @@ BeforeAll {
         )
 
         $webService = [pscustomobject]@{
-            EnableSideBySide     = $EnableSideBySide
-            SideBySideToken      = $SideBySideToken
-            AttemptCount         = 0
-            FailCount            = $FailCount
-            UpdateErrorMessage   = $ErrorMessage
+            EnableSideBySide   = $EnableSideBySide
+            SideBySideToken    = $SideBySideToken
+            AttemptCount       = 0
+            FailCount          = $FailCount
+            UpdateErrorMessage = $ErrorMessage
         }
-        Add-Member -InputObject $webService -MemberType ScriptMethod -name Update -Value {
+
+        Add-Member -InputObject $webService -MemberType ScriptMethod -Name Update -Value {
             $this.AttemptCount++
             if ($this.AttemptCount -le $this.FailCount) {
                 throw [System.Exception]::new($this.UpdateErrorMessage)
@@ -41,71 +42,125 @@ BeforeAll {
         } -Force
 
         return [pscustomobject]@{
-            name       = 'http://portal'
+            Name       = 'http://portal'
             WebService = $webService
         }
+    }
+
+    function global:Get-SPWebApplication {
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [System.String]
+            $Identity
+        )
+
+        $script:GetSpWebAppCallCount++
+        if ($PSBoundParameters.ContainsKey('Identity')) {
+            $script:GetSpWebAppIdentityCallCount++
+            if ($null -ne $script:IdentityResolver) {
+                return & $script:IdentityResolver $Identity
+            }
+            if ($null -ne $script:WebAppsByIdentity -and $script:WebAppsByIdentity.ContainsKey($Identity)) {
+                return $script:WebAppsByIdentity[$Identity]
+            }
+            return $null
+        }
+
+        return $script:WebApps
+    }
+
+    function global:Copy-SPSideBySideFiles {
+        $script:CopyCalls++
     }
 }
 
 AfterAll {
-    Remove-Module -name SPSUpdate.Common -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path Function:\global:Get-SPWebApplication -ErrorAction SilentlyContinue
+    Remove-Item -Path Function:\global:Copy-SPSideBySideFiles -ErrorAction SilentlyContinue
+    Remove-Module -Name SPSUpdate.Common -Force -ErrorAction SilentlyContinue
 }
 
 Describe 'Set-SPSSideBySideToken - bounded retry on update conflict' {
-    AfterEach {
-        Remove-Item -Path Function:\global:Get-SPWebApplication -ErrorAction SilentlyContinue
-        Remove-Item -Path Function:\global:Copy-SPSideBySideFiles -ErrorAction SilentlyContinue
+    BeforeEach {
+        $script:WebApps = @()
+        $script:WebAppsByIdentity = @{}
+        $script:IdentityResolver = $null
+        $script:StaleWebApp = $null
+        $script:FreshWebApp = $null
+        $script:SwappedToFresh = $false
+        $script:CopyCalls = 0
+        $script:GetSpWebAppCallCount = 0
+        $script:GetSpWebAppIdentityCallCount = 0
     }
 
     It 'retries update-conflict exceptions and then succeeds' {
-        $webApp = new-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 2 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+        $webApp = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 2 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+        $script:WebApps = @($webApp)
+        $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
 
-        $script:TestWebApps = @($webApp)
-        $script:CopyCalls = 0
-        function global:Get-SPWebApplication { return $script:TestWebApps }
-        function global:Copy-SPSideBySideFiles { $script:CopyCalls++ }
-        Mock -Commandname Start-Sleep -Modulename SPSUpdate.Common -MockWith {}
+        Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
 
-        $warnings = $null
-        { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false -WarningVariable warnings -WarningAction Continue } |
-            Should -not -Throw
+        { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false } |
+            Should -Not -Throw
 
         $webApp.WebService.AttemptCount | Should -Be 3
-        Should -Invoke -Commandname Start-Sleep -Modulename SPSUpdate.Common -Times 2 -Exactly -ParameterFilter { $Seconds -eq 15 }
+        Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 2 -Exactly -ParameterFilter { $Seconds -eq 15 }
         $script:CopyCalls | Should -Be 1
         $webApp.WebService.SideBySideToken | Should -Be '16.0.20326.20190'
     }
 
     It 'fails after 6 attempts when conflict persists' {
-        $webApp = new-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 99 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+        $webApp = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 99 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+        $script:WebApps = @($webApp)
+        $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
 
-        $script:TestWebApps = @($webApp)
-        $script:CopyCalls = 0
-        function global:Get-SPWebApplication { return $script:TestWebApps }
-        function global:Copy-SPSideBySideFiles { $script:CopyCalls++ }
-        Mock -Commandname Start-Sleep -Modulename SPSUpdate.Common -MockWith {}
+        Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
 
         { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false } |
             Should -Throw -ExpectedMessage '*update conflict has occurred*'
 
         $webApp.WebService.AttemptCount | Should -Be 6
-        Should -Invoke -Commandname Start-Sleep -Modulename SPSUpdate.Common -Times 5 -Exactly -ParameterFilter { $Seconds -eq 15 }
+        Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 5 -Exactly -ParameterFilter { $Seconds -eq 15 }
         $script:CopyCalls | Should -Be 0
     }
 
     It 'does not retry non-conflict exceptions' {
-        $webApp = new-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 1 -ErrorMessage 'Access denied.'
+        $webApp = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 1 -ErrorMessage 'Access denied.'
+        $script:WebApps = @($webApp)
+        $script:WebAppsByIdentity = @{ 'http://portal' = $webApp }
 
-        $script:TestWebApps = @($webApp)
-        $script:CopyCalls = 0
-        function global:Get-SPWebApplication { return $script:TestWebApps }
-        function global:Copy-SPSideBySideFiles { $script:CopyCalls++ }
-        Mock -Commandname Start-Sleep -Modulename SPSUpdate.Common -MockWith {}
+        Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {}
 
         { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false } |
             Should -Throw -ExpectedMessage '*Access denied*'
 
         $webApp.WebService.AttemptCount | Should -Be 1
-        Should -Invoke -Commandname Start-Sleep -Modulename SPSUpdate.Common -Times 0 -Exactly
+        Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 0 -Exactly
+    }
+
+    It 'refreshes a stale SPWebService instance between retries' {
+        $stale = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 99 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+        $fresh = New-TestWebApp -EnableSideBySide $true -SideBySideToken '16.0.10000.10000' -FailCount 0 -ErrorMessage 'An update conflict has occurred, and you must re-try this action.'
+        $script:WebApps = @($stale)
+        $script:WebAppsByIdentity = @{ 'http://portal' = $stale }
+        $script:SwappedToFresh = $false
+
+        Mock -CommandName Start-Sleep -ModuleName SPSUpdate.Common -MockWith {
+            if (-not $script:SwappedToFresh) {
+                $script:WebAppsByIdentity['http://portal'] = $fresh
+                $script:SwappedToFresh = $true
+            }
+        }
+
+        { Set-SPSSideBySideToken -BuildVersion '16.0.20326.20190' -EnableSideBySide $true -Confirm:$false } |
+            Should -Not -Throw
+
+        $stale.WebService.AttemptCount | Should -Be 1
+        $fresh.WebService.AttemptCount | Should -Be 1
+        $script:GetSpWebAppIdentityCallCount | Should -Be 2
+        $script:SwappedToFresh | Should -BeTrue
+        Should -Invoke -CommandName Start-Sleep -ModuleName SPSUpdate.Common -Times 1 -Exactly -ParameterFilter { $Seconds -eq 15 }
+        $script:CopyCalls | Should -Be 1
     }
 }
