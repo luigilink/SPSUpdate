@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation: the wiki `Configuration` page now explains how to run the cumulative update from a UNC share without the interactive *Open File - Security Warning* prompt (place the file server in the Local intranet zone by GPO or registry, and the `UNCAsIntranet` caveat), alongside the existing local-copy recommendation. The example config and the prerequisites now flag the pitfall. ([#81](https://github.com/luigilink/SPSUpdate/issues/81))
+
 ### Fixed
 
 - `Set-SPSSideBySideToken` now retries transient SharePoint `SPWebService.Update()` conflicts with a bounded policy (6 attempts, 15 seconds between attempts) instead of failing on the first race with concurrent `PSCONFIG` writes. The retry is conflict-specific: non-conflict errors still fail fast, and a conflict that persists through the budget is surfaced as a failure. ([#79](https://github.com/luigilink/SPSUpdate/issues/79))

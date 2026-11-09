@@ -6,7 +6,7 @@
 - CredSSP configured (used for remoting to the other farm servers)
 - Administrative privileges on each SharePoint Server
 - A service account (`InstallAccount`) whose credential is stored in `Config\secrets.psd1`
-- SharePoint update binaries copied to a local or accessible path (if using `ProductUpdate`)
+- SharePoint update binaries copied to a **local path on each server** (if using `ProductUpdate`). A UNC share works only if the file server is in the Intranet zone, otherwise Windows shows a blocking *Open File - Security Warning* prompt — see [Configuration](./Configuration#binaries-settings)
 - (Optional, for the live dashboard) a UNC share for the status store with **Modify** rights for the InstallAccount — see [Configuration](./Configuration#statusstorepath-live-dashboard)
 
 ## Configure CredSSP

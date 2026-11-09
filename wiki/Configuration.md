@@ -122,6 +122,25 @@ package or the STS + WSSLOC (language) pair, installed in order.
 > `Zone.Identifier`, not the network-location zone). That prompt blocks an unattended or
 > scheduled-task run. Copy the binaries to a local folder on each farm server first, then set
 > `SetupFullPath` to that local folder.
+>
+> **If the binaries must stay on a share**, place the file server in the **Local intranet** zone
+> for the account that runs SPSUpdate (the InstallAccount, or the account of the scheduled task):
+>
+> - **GPO (recommended):** *Computer or User Configuration > Administrative Templates > Windows
+>   Components > Internet Explorer > Internet Control Panel > Security Page > Site to Zone
+>   Assignment List*. Add `file://<server>` (or `\\<server>`) with the value `1` (Intranet).
+> - **Local registry equivalent:** create the key
+>   `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\Domains\<server>`
+>   and a `file` DWORD set to `1`. For a fully qualified name such as `pull.contoso.com`, use
+>   the parent domain key (`...\Domains\contoso.com`) with a `pull` sub-key that holds the same
+>   `file` value.
+> - If the prompt still appears, check that the assignment really applies to the account that
+>   runs the script (user vs computer policy) and that no GPO sets *Intranet Sites: Include all
+>   network paths (UNC)* to **Disabled** (`UNCAsIntranet = 0`); with that setting a UNC path is
+>   no longer treated as intranet automatically, so the explicit assignment is mandatory.
+>
+> Check with a first run on one server: the **Open File - Security Warning** prompt must not
+> appear before you roll the configuration out to the whole farm.
 
 ### `Binaries.Schedule` (optional)
 

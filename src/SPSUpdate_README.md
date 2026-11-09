@@ -93,7 +93,9 @@ shared or committed.
 
 Use `ProductUpdate`, `SetupFullPath`, `SetupFileName` and `ShutdownServices` to configure
 the binary installation step. `SetupFileName` is an array (single uber package, or the
-STS + WSSLOC language pair installed in order).
+STS + WSSLOC language pair installed in order). Keep the binaries on a local path of each
+server: running the `.exe` from a UNC share triggers a blocking *Open File - Security Warning*
+prompt unless the file server is in the Intranet zone (see the wiki `Configuration` page).
 
 #### UpgradeContentDatabase and MountContentDatabase
 
