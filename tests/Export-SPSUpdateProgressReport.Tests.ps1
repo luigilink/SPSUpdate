@@ -225,6 +225,40 @@ Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {
         $h | Should -Match 'color:var\(--primary\)">75%'
     }
 
+    It 'does not count a completed reboot as a second unit for the same server' {
+        $camp = New-Campaign -Name 'rollup-rebootdone'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP1' -State 'Done' -Detail 'Server back online after automatic reboot' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match 'Done / Skipped <span class="n">1</span>'
+        # The completed reboot stays visible as a pill on the Binaries row.
+        $h | Should -Match '<span class="pill done">Rebooted</span>'
+    }
+
+    It 'does not count a skipped reboot as an extra unit' {
+        $camp = New-Campaign -Name 'rollup-rebootskipped'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP1' -State 'Skipped' -Detail 'No reboot required' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match 'Done / Skipped <span class="n">1</span>'
+    }
+
+    It 'still counts a pending or failed reboot so the campaign cannot show a false 100%' {
+        $camp = New-Campaign -Name 'rollup-rebootopen'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP1' -State 'Pending' -Detail 'Reboot required' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP2' -State 'Done' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Reboot' -Phase 'Reboot' -Server 'APP2' -State 'Failed' -Detail 'Restart-Computer failed' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        $h | Should -Match 'Done / Skipped <span class="n">2</span>'
+        $h | Should -Match 'Pending <span class="n">1</span>'
+        $h | Should -Match 'Failed <span class="n">1</span>'
+        $h | Should -Not -Match '>100%<'
+    }
+
     It 'reflects a failed scope whose only item is still Running (scope-level failure not hidden)' {
         $camp = New-Campaign -Name 'rollup-failitem'
         Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -State 'Failed' -Item 'DB1' -ItemState 'Running' -Confirm:$false | Out-Null

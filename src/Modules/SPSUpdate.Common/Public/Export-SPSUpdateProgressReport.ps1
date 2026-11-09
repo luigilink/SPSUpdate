@@ -338,6 +338,11 @@
                 $units += 'Running'
             }
         }
+        elseif ($sc.Phase -eq 'Reboot' -and ("$($sc.State)" -eq 'Done' -or "$($sc.State)" -eq 'Skipped')) {
+            # A completed reboot is already shown as a pill on the server's Binaries row; counting it
+            # again would count the same server twice. Pending/Running/Failed reboots still count.
+            continue
+        }
         else {
             $units += "$($sc.State)"
         }

@@ -191,7 +191,7 @@ per-binary item states with exit codes, and a completion percentage for each seq
 The ring at the top shows the overall **completion percentage** of the campaign. Each unit of
 work (a server step, a content database, a reboot or SideBySide step) counts as **1** when it is
 `Done` or `Skipped` and as **half a unit** while it is `Running`, so the percentage moves while
-an installation is in progress. `Pending` and `Failed` units count for 0. The legend keeps the raw
+an installation is in progress. `Pending` and `Failed` units count for 0. A completed (or skipped) reboot is not counted as a separate unit, since it is already shown as a pill on the server's Binaries row; a pending, running or failed reboot still counts so it can never be hidden. The legend keeps the raw
 counts, and 100 % (green) is reserved for a campaign where every unit is Done or Skipped. The
 total can grow during a run when a later phase (for example the Configuration Wizard) creates its
 units.
