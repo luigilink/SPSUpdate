@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The dashboard no longer counts a server twice in `Done / Skipped` once its automatic reboot is done: a completed or skipped `Reboot` scope is not a separate unit anymore (it stays visible as the *Rebooted* pill on the Binaries row), while a pending, running or failed reboot still counts so a campaign cannot show a false 100 %. ([#86](https://github.com/luigilink/SPSUpdate/issues/86))
+- The dashboard no longer counts a server twice in `Done / Skipped` once its automatic reboot is done: a completed `Reboot` scope is not a separate unit anymore (it stays visible as the *Rebooted* pill on the Binaries row) and a skipped one (no reboot required, no pill) is not counted either, while a pending, running or failed reboot still counts so a campaign cannot show a false 100 %. ([#86](https://github.com/luigilink/SPSUpdate/issues/86))
 - `Set-SPSSideBySideToken` now retries transient SharePoint `SPWebService.Update()` conflicts with a bounded policy (6 attempts, 15 seconds between attempts) instead of failing on the first race with concurrent `PSCONFIG` writes. The retry is conflict-specific: non-conflict errors still fail fast, and a conflict that persists through the budget is surfaced as a failure. ([#79](https://github.com/luigilink/SPSUpdate/issues/79))
 
 ## [5.3.0] - 2026-10-08
