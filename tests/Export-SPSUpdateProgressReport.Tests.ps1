@@ -200,6 +200,31 @@ Describe 'Export-SPSUpdateProgressReport (campaign roll-up)' {
         $h | Should -Match '>33%<'
     }
 
+    It 'counts a Running unit as half a unit in the completion percentage' {
+        $camp = New-Campaign -Name 'rollup-halfrun'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Running' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Running' -Confirm:$false | Out-Null
+        $inv = New-Inventory -Path (Join-Path $camp 'inv.json')
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp -ContentDbInventoryFile $inv
+        $h = Get-Content -Path $out -Raw
+        # 2 Running (1 unit) + 2 Pending out of 4 units = 25%, legend keeps the raw counts.
+        $h | Should -Match '>25%<'
+        $h | Should -Match 'Done / Skipped <span class="n">0</span>'
+        $h | Should -Match 'Running <span class="n">2</span>'
+        # The blue arc uses the same half weight as the percentage.
+        $h | Should -Match 'stroke-dasharray="25 100" stroke-dashoffset="-0"'
+    }
+
+    It 'adds half a unit per Running unit to the Done units' {
+        $camp = New-Campaign -Name 'rollup-halfmix'
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'APP1' -State 'Done' -Confirm:$false | Out-Null
+        Set-SPSUpdateStatus -CampaignPath $camp -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Server 'WFE1' -State 'Running' -Confirm:$false | Out-Null
+        $out = Export-SPSUpdateProgressReport -CampaignPath $camp
+        $h = Get-Content -Path $out -Raw
+        # (1 Done + 0.5 Running) / 2 units = 75%, never the green 100%.
+        $h | Should -Match 'color:var\(--primary\)">75%'
+    }
+
     It 'reflects a failed scope whose only item is still Running (scope-level failure not hidden)' {
         $camp = New-Campaign -Name 'rollup-failitem'
         Set-SPSUpdateStatus -CampaignPath $camp -Scope 'Sequence1' -Phase 'Upgrade' -Server 'APP1' -State 'Failed' -Item 'DB1' -ItemState 'Running' -Confirm:$false | Out-Null
