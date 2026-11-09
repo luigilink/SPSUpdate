@@ -66,6 +66,17 @@ is typically used on the source farm before a farm upgrade (for example SharePoi
 2019 → Subscription Edition) so the inventory can be copied to the target farm and consumed
 by the `MountContentDatabase` flow.
 
+> **Re-run `InitContentDB` whenever a content database is added to or removed from the local
+> farm.** The inventory is cached and reused: databases created after its last generation are
+> not shown on the dashboard and are **not mounted or upgraded** by the sequences. The Default
+> master run and `Test-SPSUpdateReadiness.ps1` compare the inventory with the live farm and
+> warn about databases that are attached but missing from it. Inventory databases that are not
+> attached are only reported, because they are expected for an inventory imported from a source
+> farm (pending mounts). **Do not regenerate an imported inventory:** `InitContentDB` replaces
+> it with the databases currently attached and would drop the ones still waiting to be mounted.
+> When a campaign dashboard already exists, `InitContentDB` also refreshes its content database
+> list. `ResetStatus` does not read SharePoint, so it never refreshes the inventory by itself.
+
 > Since v5.0.0 SPSUpdate is Subscription Edition only. To run `InitContentDB` on a
 > **SharePoint Server 2019 source farm** during a 2019 → Subscription Edition migration, use
 > the [`4.x` line](https://github.com/luigilink/SPSUpdate/releases/tag/v4.3.0) (latest: v4.3.0).
