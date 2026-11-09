@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Documentation: the wiki `Configuration` page now explains how to run the cumulative update from a UNC share without the interactive *Open File - Security Warning* prompt (place the file server in the Local intranet zone by GPO or registry, and the `UNCAsIntranet` caveat), alongside the existing local-copy recommendation. The example config and the prerequisites now flag the pitfall. ([#81](https://github.com/luigilink/SPSUpdate/issues/81))
+- The dashboard completion percentage now counts a **Running** unit as half a unit (`(Done + Skipped + 0.5 x Running) / total`), and the blue arc of the ring uses the same weight. Previously the ring filled for running work while the centre text stayed at `0%` for the whole binary installation. 100 % and the green colour remain reserved for a campaign where every unit is Done or Skipped. ([#83](https://github.com/luigilink/SPSUpdate/issues/83))
 
 ### Fixed
 

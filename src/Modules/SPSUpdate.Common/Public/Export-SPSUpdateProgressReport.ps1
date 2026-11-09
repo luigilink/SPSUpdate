@@ -361,10 +361,13 @@
     # cap the displayed percentage at 99 so rounding (e.g. 299/300 = 99.67 -> 100) never shows a
     # green 100% while any unit is still Pending/Running.
     $allComplete = ($total -gt 0 -and $countDone -eq $total)
-    $pct = if ($total -gt 0) { [int]([math]::Round($countDone / $total * 100, 0)) } else { 0 }
+    # A Running unit counts as half a unit, so the percentage moves while work is in progress and
+    # stays consistent with the blue arc of the ring.
+    $progressUnits = $countDone + (0.5 * $countRunning)
+    $pct = if ($total -gt 0) { [int]([math]::Round($progressUnits / $total * 100, 0)) } else { 0 }
     if ($pct -ge 100 -and -not $allComplete) { $pct = 99 }
     $donePctSeg = if ($total -gt 0) { [math]::Round($countDone / $total * 100, 2) } else { 0 }
-    $runPctSeg = if ($total -gt 0) { [math]::Round($countRunning / $total * 100, 2) } else { 0 }
+    $runPctSeg = if ($total -gt 0) { [math]::Round(0.5 * $countRunning / $total * 100, 2) } else { 0 }
     $pctColor = if ($countFailed -gt 0) { 'var(--err)' } elseif ($allComplete) { 'var(--ok)' } else { 'var(--primary)' }
 
     $serverCount = @(@($binaries.Server) + @($wizard.Server) | Select-Object -Unique).Count
