@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-11-09
+
 ### Changed
 
 - Documentation: the wiki `Configuration` page now explains how to run the cumulative update from a UNC share without the interactive *Open File - Security Warning* prompt (place the file server in the Local intranet zone by GPO or registry, and the `UNCAsIntranet` caveat), alongside the existing local-copy recommendation. The example config and the prerequisites now flag the pitfall. ([#81](https://github.com/luigilink/SPSUpdate/issues/81))
