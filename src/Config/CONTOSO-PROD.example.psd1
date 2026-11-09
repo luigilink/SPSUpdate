@@ -67,6 +67,8 @@
 
         # SetupFullPath : folder (local to each server) that holds the update binaries.
         # Possible values : any absolute Windows path.
+        # Avoid a UNC share: running the .exe from \\server\share shows an interactive
+        # 'Open File - Security Warning' unless the server is in the Intranet zone (see the wiki).
         SetupFullPath    = 'D:\SoftwarePackages\SPS\cumulativeupdates'
 
         # SetupFileName : update executable(s), installed in the listed order. Provide a
