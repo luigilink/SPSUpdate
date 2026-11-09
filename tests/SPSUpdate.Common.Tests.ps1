@@ -44,6 +44,7 @@ Describe 'SPSUpdate.Common module' {
         $expected = @(
             'Add-SPSScheduledTask'
             'Add-SPSUpdateEvent'
+            'Compare-SPSContentDbInventory'
             'ConvertTo-SPSConfigBoolean'
             'ConvertTo-SPSPatchStatusLabel'
             'ConvertTo-SPSRoleLabel'
