@@ -1394,7 +1394,22 @@ Exception: $_
     'ProductUpdate' {
         # Repair an interrupted previous update first (services left disabled and stopped), whatever the
         # install window or the package say. -WhatIf is honoured by the function.
-        $null = Restore-SPSUpdateServices -StateFolder $pathResultsFolder
+        if (-not (Restore-SPSUpdateServices -StateFolder $pathResultsFolder)) {
+            $catchMessage = @"
+The services of an interrupted ProductUpdate could not be restored on server: $($env:COMPUTERNAME)
+State files: $($pathResultsFolder)
+Fix the problem and run Restore-SPSUpdateServices -StateFolder '$($pathResultsFolder)' before the next update.
+"@
+            Write-Error -Message $catchMessage
+            Add-SPSUpdateEvent -Message $catchMessage -Source 'Restore-SPSUpdateServices' -EntryType 'Error'
+            Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Failed' -Detail 'Services of an interrupted update could not be restored'
+            Write-SPSDashboard
+            if ($script:TranscriptStarted) {
+                Stop-Transcript | Out-Null
+                $script:TranscriptStarted = $false
+            }
+            exit
+        }
         # Optional install schedule gate (Binaries.Schedule). Outside the window, skip the
         # install entirely and fail closed on a malformed window.
         $installAllowed = $true

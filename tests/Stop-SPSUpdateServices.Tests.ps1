@@ -6,6 +6,7 @@ BeforeAll {
     $script:StopPath = Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Public/Stop-SPSUpdateServices.ps1'
     $script:RestorePath = Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Public/Restore-SPSUpdateServices.ps1'
     . (Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Private/Get-SPSServiceStatePath.ps1')
+    . (Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Private/Test-SPSServiceStateActive.ps1')
     . $script:StopPath
     . $script:RestorePath
 
@@ -224,6 +225,42 @@ Describe 'Stop-SPSUpdateServices' {
         @($script:Calls | Where-Object { $_ -like 'stop:*' }).Count | Should -Be 0
         @(Get-ChildItem -Path $script:Folder -Filter 'SPSUpdate-ServicesState_*.json').Count | Should -Be 1
         Should -Invoke Add-SPSUpdateEvent -ParameterFilter { $EntryType -eq 'Error' -and $Message -like '*could not be restored*' }
+    }
+
+    It 'records its own process as the owner of the state file' {
+        $r = Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder $script:Folder
+        $state = Get-Content -Path $r.Path -Raw | ConvertFrom-Json
+
+        $state.ProcessId | Should -Be $PID
+        $state.ProcessStart | Should -Not -BeNullOrEmpty
+    }
+
+    It 'refuses to start, changes nothing and keeps the file when another update is running on this server' {
+        New-Item -Path $script:Folder -ItemType Directory -Force | Out-Null
+        $running = Join-Path -Path $script:Folder -ChildPath "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_20260101000000000.json"
+        [pscustomobject]@{ Computer = 'X'; ProcessId = ($PID + 1); ProcessStart = ([datetime]'2026-11-18T10:00:00').ToString('o'); IisReset = $false; Services = @([pscustomobject]@{ Name = 'SPTimerV4'; StartType = 'Automatic'; Status = 'Running'; GracefulAttempted = $false }) } |
+            ConvertTo-Json -Depth 4 | Set-Content -Path $running
+        $script:Svc['SPTimerV4'].Status = 'Stopped'
+        Mock Get-Process { [pscustomobject]@{ Id = $PID + 1; StartTime = [datetime]'2026-11-18T10:00:00' } }
+
+        { Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder $script:Folder } | Should -Throw '*Another ProductUpdate is running*'
+
+        Test-Path -Path $running | Should -BeTrue
+        @($script:Calls).Count | Should -Be 0
+        @(Get-ChildItem -Path $script:Folder -Filter 'SPSUpdate-ServicesState_*.json').Count | Should -Be 1
+    }
+
+    It 'treats a state file whose owner process is gone as a leftover and restores it' {
+        New-Item -Path $script:Folder -ItemType Directory -Force | Out-Null
+        $gone = Join-Path -Path $script:Folder -ChildPath "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_20260101000000000.json"
+        [pscustomobject]@{ Computer = 'X'; ProcessId = ($PID + 1); ProcessStart = ([datetime]'2026-11-18T10:00:00').ToString('o'); IisReset = $false; Services = @([pscustomobject]@{ Name = 'SPTimerV4'; StartType = 'Automatic'; Status = 'Running'; GracefulAttempted = $false }) } |
+            ConvertTo-Json -Depth 4 | Set-Content -Path $gone
+        Mock Get-Process { $null }
+
+        $null = Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder $script:Folder -WarningAction SilentlyContinue
+
+        Test-Path -Path $gone | Should -BeFalse
+        $script:Calls | Should -Contain 'start:SPTimerV4'
     }
 
     It 'ignores the legacy ServicesStatus_*.json files' {

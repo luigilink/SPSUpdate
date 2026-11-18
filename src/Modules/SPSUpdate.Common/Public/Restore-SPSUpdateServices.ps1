@@ -16,8 +16,9 @@
         restored. A state file is deleted only when everything was restored, so a failed restore can be
         retried.
 
-        With -StateFolder, every state file of this computer in the folder is restored, oldest first. This
-        repairs a server after an interrupted update, and ProductUpdate does it before anything else:
+        With -StateFolder, every state file of this computer in the folder is restored, oldest first, except
+        the files of an update that is running right now (their owner process is recorded in the file).
+        This repairs a server after an interrupted update, and ProductUpdate does it before anything else:
 
         Restore-SPSUpdateServices -StateFolder 'F:\SCRIPTS\SPSUpdate\Results'
 
@@ -53,6 +54,10 @@
         $stateFiles = @(Get-ChildItem -Path $StateFolder -Filter "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_*.json" -File -ErrorAction SilentlyContinue | Sort-Object -Property Name)
         $allRestored = $true
         foreach ($stateFile in $stateFiles) {
+            if (Test-SPSServiceStateActive -Path $stateFile.FullName) {
+                Write-Verbose -Message "The state file $($stateFile.FullName) belongs to an update that is running: leaving it alone."
+                continue
+            }
             $foundMessage = "A service state file from an interrupted ProductUpdate was found ($($stateFile.FullName)). Restoring the services."
             Write-Warning -Message $foundMessage
             Add-SPSUpdateEvent -Message $foundMessage -Source 'Restore-SPSUpdateServices' -EntryType 'Warning'
@@ -65,6 +70,9 @@
 
     if (-not (Test-Path -Path $Path)) {
         throw "Service state file not found: $Path"
+    }
+    if (Test-SPSServiceStateActive -Path $Path) {
+        throw "The state file $Path belongs to an update that is running. Wait for it to finish."
     }
     if (-not $PSCmdlet.ShouldProcess($Path, 'Restore the services saved before the update')) {
         return $true

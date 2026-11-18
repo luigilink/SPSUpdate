@@ -23,7 +23,9 @@
 
         State files left behind by a previous interrupted run on this computer are restored first. When
         that fails the function stops with an error and keeps the files: taking a new snapshot of
-        services that are still disabled would record the wrong original state.
+        services that are still disabled would record the wrong original state. A state file whose
+        owner process (recorded in the file) is still running belongs to an update in progress: the
+        function refuses to start and changes nothing.
 
         A service that cannot be disabled or stopped raises a warning and an event log entry; the
         install then continues (it is slower, not unsafe).
@@ -73,6 +75,16 @@
 
     if (-not (Test-Path -Path $StateFolder)) {
         New-Item -Path $StateFolder -ItemType Directory -Force | Out-Null
+    }
+
+    # A state file whose owner still runs belongs to an update that is in progress on this server: its
+    # services are stopped on purpose, so a second update must neither restore them nor stop them again.
+    foreach ($candidate in @(Get-ChildItem -Path $StateFolder -Filter "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_*.json" -File -ErrorAction SilentlyContinue)) {
+        if (Test-SPSServiceStateActive -Path $candidate.FullName) {
+            $busyMessage = "Another ProductUpdate is running on this server (state file $($candidate.FullName)). Wait for it to finish; nothing was changed."
+            Add-SPSUpdateEvent -Message $busyMessage -Source 'Stop-SPSUpdateServices' -EntryType 'Error'
+            throw $busyMessage
+        }
     }
 
     # Repair a previous interrupted run first: its state file holds the real original state. A new
@@ -125,9 +137,13 @@
     if ([string]::IsNullOrEmpty($StatePath)) {
         $StatePath = Get-SPSServiceStatePath -StateFolder $StateFolder
     }
+    $ownerStart = ''
+    try { $ownerStart = (Get-Process -Id $PID -ErrorAction Stop).StartTime.ToString('o') } catch { $ownerStart = '' }
     $writeState = {
         $stateObject = [PSCustomObject]@{
             Computer        = "$($env:COMPUTERNAME)"
+            ProcessId       = $PID
+            ProcessStart    = $ownerStart
             Created         = (Get-Date).ToString('s')
             ShutdownProfile = $ShutdownProfile
             IisReset        = $isBasic

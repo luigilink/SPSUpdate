@@ -5,6 +5,7 @@ BeforeAll {
     $script:StopPath = Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Public/Stop-SPSUpdateServices.ps1'
     $script:RestorePath = Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Public/Restore-SPSUpdateServices.ps1'
     . (Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Private/Get-SPSServiceStatePath.ps1')
+    . (Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Private/Test-SPSServiceStateActive.ps1')
     . $script:StopPath
     . $script:RestorePath
 
@@ -227,6 +228,41 @@ Describe 'Restore-SPSUpdateServices (state folder)' {
         $ok | Should -BeFalse
         $script:Calls | Should -Contain 'start:SPTimerV4'
         Test-Path -Path $bad | Should -BeTrue
+    }
+
+    It 'leaves the state file of a running update alone and restores the others' {
+        $c = $env:COMPUTERNAME
+        $running = Join-Path -Path $script:Folder -ChildPath "SPSUpdate-ServicesState_${c}_20260102000000000.json"
+        [pscustomobject]@{ Computer = 'X'; ProcessId = ($PID + 1); ProcessStart = ([datetime]'2026-11-18T10:00:00').ToString('o'); IisReset = $false; Services = @((New-ServiceEntry 'SPTimerV4')) } | ConvertTo-Json -Depth 4 | Set-Content -Path $running
+        $null = New-StateFile -Folder $script:Folder -Name "SPSUpdate-ServicesState_${c}_20260101000000000.json" -Services @((New-ServiceEntry 'SPAdminV4'))
+        Mock Get-Process { [pscustomobject]@{ Id = $PID + 1; StartTime = [datetime]'2026-11-18T10:00:00' } }
+
+        $ok = Restore-SPSUpdateServices -StateFolder $script:Folder -WarningAction SilentlyContinue
+
+        $ok | Should -BeTrue
+        @($script:Calls | Where-Object { $_ -like 'start:*' }) | Should -Be @('start:SPAdminV4')
+        Test-Path -Path $running | Should -BeTrue
+    }
+
+    It 'refuses to restore the file of a running update when it is given by path' {
+        $running = Join-Path -Path $script:Folder -ChildPath 'running.json'
+        [pscustomobject]@{ Computer = 'X'; ProcessId = ($PID + 1); ProcessStart = ([datetime]'2026-11-18T10:00:00').ToString('o'); IisReset = $false; Services = @((New-ServiceEntry 'SPTimerV4')) } | ConvertTo-Json -Depth 4 | Set-Content -Path $running
+        Mock Get-Process { [pscustomobject]@{ Id = $PID + 1; StartTime = [datetime]'2026-11-18T10:00:00' } }
+
+        { Restore-SPSUpdateServices -Path $running } | Should -Throw '*is running*'
+
+        @($script:Calls).Count | Should -Be 0
+        Test-Path -Path $running | Should -BeTrue
+    }
+
+    It 'restores its own file (same process) as usual' {
+        $own = Join-Path -Path $script:Folder -ChildPath 'own.json'
+        [pscustomobject]@{ Computer = 'X'; ProcessId = $PID; ProcessStart = (Get-Date).ToString('o'); IisReset = $false; Services = @((New-ServiceEntry 'SPTimerV4')) } | ConvertTo-Json -Depth 4 | Set-Content -Path $own
+
+        Restore-SPSUpdateServices -Path $own | Should -BeTrue
+
+        $script:Calls | Should -Contain 'start:SPTimerV4'
+        Test-Path -Path $own | Should -BeFalse
     }
 
     It 'honours -WhatIf on the folder' {

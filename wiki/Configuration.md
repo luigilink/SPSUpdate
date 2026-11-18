@@ -184,7 +184,12 @@ restarted in the reverse order.
   the services from the leftover file **before anything else**, even when the package is already
   installed or the run is outside the install window. If that restore fails, the shutdown stops
   with an error and keeps the file, instead of taking a new snapshot of services that are still
-  disabled. You can also repair a server by hand:
+  disabled. This recovery runs **first**: if it fails, the server is reported as **Failed** on the
+  dashboard and the run stops before the install window and any pending reboot are looked at.
+  A state file is never restored while the update that wrote it is still running: the file records
+  its owner process, so a second `ProductUpdate` started on the same server refuses to run (and
+  changes nothing) instead of restarting the services of the one in progress. You can also repair a
+  server by hand:
 
   ```powershell
   Import-Module .\Modules\SPSUpdate.Common\SPSUpdate.Common.psd1
