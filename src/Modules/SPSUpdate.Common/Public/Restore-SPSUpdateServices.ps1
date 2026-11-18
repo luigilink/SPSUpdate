@@ -78,6 +78,7 @@
     foreach ($service in $services) {
         if ($null -eq $service -or [string]::IsNullOrEmpty("$($service.Name)")) { continue }
         Write-Verbose -Message "Service: $($service.Name) - Startup type before installation: $($service.StartType) - Status before installation: $($service.Status)"
+        $instanceAddedBack = $false
 
         if ($service.PSObject.Properties.Name -contains 'GracefulAttempted' -and [bool]$service.GracefulAttempted) {
             # The removal of the instance was decided before it was done: find out whether it happened.
@@ -93,16 +94,19 @@
                 try {
                     Write-Verbose -Message 'Adding the Distributed Cache service instance back.'
                     Add-SPDistributedCacheServiceInstance -ErrorAction Stop
+                    $instanceAddedBack = $true
                 }
                 catch {
                     $failures++
                     $message = "Could not add the Distributed Cache service instance back after the update: $($_.Exception.Message)"
                     Write-Warning -Message $message
                     Add-SPSUpdateEvent -Message $message -Source 'Restore-SPSUpdateServices' -EntryType 'Error'
+                    continue
                 }
-                continue
             }
-            Write-Verbose -Message 'The Distributed Cache service instance is still in the farm: restoring the SPCache service like the others.'
+            else {
+                Write-Verbose -Message 'The Distributed Cache service instance is still in the farm: restoring the SPCache service like the others.'
+            }
         }
 
         try {
@@ -113,6 +117,11 @@
             $message = "Could not restore the startup type '$($service.StartType)' of service $($service.Name): $($_.Exception.Message)"
             Write-Warning -Message $message
             Add-SPSUpdateEvent -Message $message -Source 'Restore-SPSUpdateServices' -EntryType 'Error'
+        }
+
+        if ($instanceAddedBack) {
+            # Adding the instance provisions and starts the service: only its startup type had to be put back.
+            continue
         }
 
         if ("$($service.Status)" -eq 'Running') {

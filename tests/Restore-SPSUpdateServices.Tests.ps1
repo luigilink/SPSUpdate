@@ -82,13 +82,25 @@ Describe 'Restore-SPSUpdateServices (one state file)' {
         Should -Invoke Add-SPSUpdateEvent -ParameterFilter { $EntryType -eq 'Error' -and $Message -like '*SPAdminV4*' }
     }
 
-    It 'adds the Distributed Cache instance back when it was removed after the intention was recorded' {
+    It 'adds the Distributed Cache instance back when it was removed after the intention was recorded, then puts its startup type back' {
         $script:DCacheInstancePresent = $false
-        $p = New-StateFile -Services @((New-ServiceEntry 'SPCache' 'Automatic' 'Running' $true))
-        $null = Restore-SPSUpdateServices -Path $p
+        $p = New-StateFile -Services @((New-ServiceEntry 'SPCache' 'Manual' 'Running' $true))
+        $ok = Restore-SPSUpdateServices -Path $p
 
+        $ok | Should -BeTrue
+        @($script:Calls) | Should -Be @('add-dcache', 'set:SPCache:Manual')
+        Test-Path -Path $p | Should -BeFalse
+    }
+
+    It 'keeps the file and returns false when the startup type of the re-added cache service cannot be put back' {
+        $script:DCacheInstancePresent = $false
+        Mock Set-Service { throw 'access denied' }
+        $p = New-StateFile -Services @((New-ServiceEntry 'SPCache' 'Manual' 'Running' $true))
+        $ok = Restore-SPSUpdateServices -Path $p -WarningAction SilentlyContinue
+
+        $ok | Should -BeFalse
+        Test-Path -Path $p | Should -BeTrue
         $script:Calls | Should -Contain 'add-dcache'
-        $script:Calls | Should -Not -Contain 'start:SPCache'
     }
 
     It 'restores SPCache like any service when the instance is still there (the removal never happened)' {

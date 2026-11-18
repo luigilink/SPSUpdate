@@ -1456,9 +1456,11 @@ Graceful Stop Distributed Cache: $($envCfg.Binaries.GracefulStopDistributedCache
                 }
                 # Unblock setup file if it is blocked
                 Unblock-File -Path $fullSetupFilePath -Verbose
+                $serviceRecoveryFailed = $false
                 $puExitCode = Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices `
                     -ServiceShutdownProfile $envCfg.Binaries.ServiceShutdownProfile `
-                    -GracefulStopDistributedCache $envCfg.Binaries.GracefulStopDistributedCache -Verbose
+                    -GracefulStopDistributedCache $envCfg.Binaries.GracefulStopDistributedCache `
+                    -ServiceRecoveryFailed ([ref]$serviceRecoveryFailed) -Verbose
                 if ($null -eq $puExitCode) {
                     # No install happened: already at or above the patch level.
                     Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail 'already installed'
@@ -1497,6 +1499,12 @@ Graceful Stop Distributed Cache: $($envCfg.Binaries.GracefulStopDistributedCache
                     Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail $puDetail -ExitCode ([int]$puExitCode)
                 }
                 Write-SPSDashboard
+                # The install itself succeeded (and a required reboot is already recorded above), but services that
+                # stay stopped or disabled must not be reported as a successful ProductUpdate. A reboot would not
+                # help: a disabled service stays disabled, so the automatic reboot is skipped as well.
+                if ($serviceRecoveryFailed) {
+                    throw "The update was installed but the services could not be fully restored. Run Restore-SPSUpdateServices -StateFolder '$pathResultsFolder' (or start the services by hand), then restart the server if a reboot is required."
+                }
             }
             if ($WhatIfPreference) {
                 # Genuine dry run (-WhatIf): nothing was installed. Report the scope as Pending with

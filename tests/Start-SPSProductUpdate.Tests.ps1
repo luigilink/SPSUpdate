@@ -80,6 +80,50 @@ Describe 'Start-SPSProductUpdate service handling' {
         Should -Invoke Restore-SPSUpdateServices -Times 1 -Exactly -ParameterFilter { $Path -eq $script:LastStatePath }
     }
 
+    It 'tells the caller when the services could not be fully restored, and still returns the exit code of the installer' {
+        Mock Restore-SPSUpdateServices { if ($Path) { return $false }; $true }
+        $failed = $false
+
+        $rc = Start-SPSProductUpdate -SetupFile $script:Setup -ShutdownServices $true -ServiceRecoveryFailed ([ref]$failed) -Confirm:$false -WarningAction SilentlyContinue
+
+        $rc | Should -Be 0
+        $failed | Should -BeTrue
+    }
+
+    It 'keeps the reboot-required exit code when the services could not be fully restored' {
+        Mock Start-Process { [pscustomobject]@{ ExitCode = 17022 } }
+        Mock Restore-SPSUpdateServices { if ($Path) { return $false }; $true }
+        $failed = $false
+
+        $rc = Start-SPSProductUpdate -SetupFile $script:Setup -ShutdownServices $true -ServiceRecoveryFailed ([ref]$failed) -Confirm:$false -WarningAction SilentlyContinue
+
+        $rc | Should -Be 17022
+        $failed | Should -BeTrue
+    }
+
+    It 'leaves the recovery flag alone when the services are restored' {
+        $failed = $false
+
+        $null = Start-SPSProductUpdate -SetupFile $script:Setup -ShutdownServices $true -ServiceRecoveryFailed ([ref]$failed) -Confirm:$false
+
+        $failed | Should -BeFalse
+    }
+
+    It 'does not need the recovery flag to be passed' {
+        Mock Restore-SPSUpdateServices { if ($Path) { return $false }; $true }
+        { Start-SPSProductUpdate -SetupFile $script:Setup -ShutdownServices $true -Confirm:$false -WarningAction SilentlyContinue } | Should -Not -Throw
+    }
+
+    It 'does not start the update when an interrupted previous update cannot be repaired' {
+        Mock Restore-SPSUpdateServices { $false }
+
+        { Start-SPSProductUpdate -SetupFile $script:Setup -ShutdownServices $true -Confirm:$false } | Should -Throw '*could not be restored*'
+
+        Should -Invoke Stop-SPSUpdateServices -Times 0 -Exactly
+        Should -Invoke Start-Process -Times 0 -Exactly
+        Should -Invoke Add-SPSUpdateEvent -ParameterFilter { $EntryType -eq 'Error' }
+    }
+
     It 'repairs an interrupted previous update before anything else' {
         $null = Start-SPSProductUpdate -SetupFile $script:Setup -ShutdownServices $true -Confirm:$false
         Should -Invoke Restore-SPSUpdateServices -Times 1 -Exactly -ParameterFilter { $StateFolder }

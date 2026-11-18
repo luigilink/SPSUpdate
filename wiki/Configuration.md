@@ -193,6 +193,12 @@ restarted in the reverse order.
 - **Errors are not silent.** A service that cannot be stopped or restored raises a warning and an
   entry in the `SPSUpdate` event log. The install continues when a stop fails (it is only
   slower); a failed restore keeps the state file so it can be retried.
+- **A failed restore is not a successful update.** If the services cannot be fully restored after
+  the install, the installer exit code is kept (a required reboot stays recorded) but the server is
+  reported as **Failed** on the dashboard and no automatic reboot is started: a reboot would not
+  re-enable a service that is disabled. Run `Restore-SPSUpdateServices -StateFolder` (or start the
+  services by hand), then restart the server if a reboot is required. The same applies at the next
+  run: if the services of an interrupted update cannot be restored, the update is not started.
 
 **`GracefulStopDistributedCache`** (`Extended` only, default `$false`) stops the Distributed
 Cache host gracefully (`Stop-AFCacheHost -Graceful`, then `Remove-SPDistributedCacheServiceInstance`)

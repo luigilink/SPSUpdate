@@ -18,7 +18,13 @@
 
         [Parameter()]
         [System.Boolean]
-        $GracefulStopDistributedCache = $false
+        $GracefulStopDistributedCache = $false,
+
+        # Set to $true when the services could not be fully restored after the install. The exit code of the
+        # installer is still returned, so a required reboot is not lost: the caller decides what to report.
+        [Parameter()]
+        [ref]
+        $ServiceRecoveryFailed
     )
 
     Write-Verbose -Message "Getting install status of SP binaries"
@@ -31,7 +37,11 @@
     # must not wait for the next package that needs an install.
     $serviceStateFolder = if ([string]::IsNullOrEmpty($script:ModuleRoot)) { Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath 'SPSUpdate' }
     else { Join-Path -Path (Split-Path -Parent (Split-Path -Parent $script:ModuleRoot)) -ChildPath 'Results' }
-    $null = Restore-SPSUpdateServices -StateFolder $serviceStateFolder
+    if (-not (Restore-SPSUpdateServices -StateFolder $serviceStateFolder)) {
+        $recoveryMessage = "The services of an interrupted ProductUpdate could not be restored (state files in $serviceStateFolder). The update was not started. Fix the problem and run Restore-SPSUpdateServices -StateFolder '$serviceStateFolder'."
+        Add-SPSUpdateEvent -Message $recoveryMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+        throw $recoveryMessage
+    }
 
     Write-Verbose -Message "Checking file status of $SetupFile"
     Write-Verbose -Message "Checking status now"
@@ -111,7 +121,9 @@ Error codes can be found at https://aka.ms/installerrorcodes
             # Always put the services back, also when the installer or the shutdown itself failed: the state
             # file is written before the first change, so its presence says that something has to be restored.
             if ($ShutdownServices -and (Test-Path -Path $serviceStatePath)) {
-                $null = Restore-SPSUpdateServices -Path $serviceStatePath
+                if (-not (Restore-SPSUpdateServices -Path $serviceStatePath) -and $null -ne $ServiceRecoveryFailed) {
+                    $ServiceRecoveryFailed.Value = $true
+                }
             }
         }
         return [int]$setupInstall.ExitCode
