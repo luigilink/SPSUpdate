@@ -55,6 +55,8 @@ If an optional key is omitted, SPSUpdate applies a safe default:
 |---|---|---|
 | `Binaries.ProductUpdate` | `$true` / `$false` | `$true` |
 | `Binaries.ShutdownServices` | `$true` / `$false` | `$true` |
+| `Binaries.ServiceShutdownProfile` | `'Basic'` / `'Extended'` | `'Basic'` |
+| `Binaries.GracefulStopDistributedCache` | `$true` / `$false` | `$false` |
 | `UpgradeContentDatabase` | `$true` / `$false` | `$true` |
 | `MountContentDatabase` | `$true` / `$false` | `$false` |
 | `SideBySideToken.Enable` | `$true` / `$false` | `$false` |
@@ -110,8 +112,8 @@ generated file names.
 
 ## Binaries settings
 
-Use `ProductUpdate`, `SetupFullPath`, `SetupFileName` and `ShutdownServices` to configure
-the binary installation step. `SetupFileName` is an array, so you can list a single uber
+Use `ProductUpdate`, `SetupFullPath`, `SetupFileName`, `ShutdownServices` and, optionally,
+`ServiceShutdownProfile` / `GracefulStopDistributedCache` to configure the binary installation step. `SetupFileName` is an array, so you can list a single uber
 package or the STS + WSSLOC (language) pair, installed in order.
 
 > **Recommendation — keep the update binaries on a local drive.** Point `SetupFullPath` at a
@@ -141,6 +143,82 @@ package or the STS + WSSLOC (language) pair, installed in order.
 >
 > Check with a first run on one server: the **Open File - Security Warning** prompt must not
 > appear before you roll the configuration out to the whole farm.
+
+### `Binaries.ServiceShutdownProfile` and `Binaries.GracefulStopDistributedCache` (optional)
+
+On SharePoint Server Subscription Edition the installer can take hours when the SharePoint and
+IIS services are still running (files in use in the GAC). With `ShutdownServices = $true`,
+SPSUpdate stops the services before the installer runs and puts them back afterwards. The
+profile chooses **which** services:
+
+| Profile | Services stopped (in this order) | IIS |
+|---|---|---|
+| `Basic` (default) | `SPSearchHostController`, `SPTimerV4`, `IISADMIN`, `OSearch16` | `iisreset -stop` / `-start` |
+| `Extended` | `SPTimerV4`, `SPTraceV4`, `SPAdminV4`, `W3SVC`, `OSearch16`, `SPSearchHostController`, `SPCache` | `W3SVC` is stopped as a service |
+
+```powershell
+Binaries = @{
+    # ...
+    ShutdownServices             = $true
+    ServiceShutdownProfile       = 'Extended'   # 'Basic' (default) | 'Extended'
+    GracefulStopDistributedCache = $false       # Extended only, see below
+}
+```
+
+`Extended` follows the order published by Stefan Gossner in
+[Solving the extended install time for SPSE CUs](https://blog.stefan-gossner.com/2024/03/08/solving-the-extended-install-time-for-spse-cus/):
+the order matters so that the services are not restarted by one another. The services are
+restarted in the reverse order.
+
+- **It follows the role of each server.** With `Extended`, only the services that **exist and
+  are running** on the server are touched: a front-end without search or Distributed Cache
+  keeps those services out of the process, whatever its MinRole. A service that was already
+  stopped is left stopped.
+- **The state is saved first.** Before the first service is stopped, the startup type and status
+  of every service that will be changed is written to
+  `Results\SPSUpdate-ServicesState_<server>_<date>.json` (written aside and then moved in place, so
+  it is never half written). The services are restored in a `finally` block, so they come back
+  **even if the installer or the shutdown itself fails**. The file is deleted once everything is
+  restored, IIS included (the exit code of `iisreset` is checked).
+- **Interrupted run (crash, server killed).** The next `ProductUpdate` on that server restores
+  the services from the leftover file **before anything else**, even when the package is already
+  installed or the run is outside the install window. If that restore fails, the shutdown stops
+  with an error and keeps the file, instead of taking a new snapshot of services that are still
+  disabled. This recovery runs **first**: if it fails, the server is reported as **Failed** on the
+  dashboard and the run stops before the install window and any pending reboot are looked at.
+  A state file is never restored while the update that wrote it is still running: the file records
+  its owner process, so a second `ProductUpdate` started on the same server refuses to run (and
+  changes nothing) instead of restarting the services of the one in progress. You can also repair a
+  server by hand:
+
+  ```powershell
+  Import-Module .\Modules\SPSUpdate.Common\SPSUpdate.Common.psd1
+  Restore-SPSUpdateServices -StateFolder 'F:\SCRIPTS\SPSUpdate\Results'
+  ```
+- **Errors are not silent.** A service that cannot be stopped or restored raises a warning and an
+  entry in the `SPSUpdate` event log. The install continues when a stop fails (it is only
+  slower); a failed restore keeps the state file so it can be retried.
+- **A failed restore is not a successful update.** If the services cannot be fully restored after
+  the install, the installer exit code is kept (a required reboot stays recorded) but the server is
+  reported as **Failed** on the dashboard and no automatic reboot is started: a reboot would not
+  re-enable a service that is disabled. Run `Restore-SPSUpdateServices -StateFolder` (or start the
+  services by hand), then restart the server if a reboot is required. The same applies at the next
+  run: if the services of an interrupted update cannot be restored, the update is not started.
+
+**`GracefulStopDistributedCache`** (`Extended` only, default `$false`) stops the Distributed
+Cache host gracefully (`Stop-AFCacheHost -Graceful`, then `Remove-SPDistributedCacheServiceInstance`)
+so that the cache content is replicated to the other cache hosts, and adds the instance back
+afterwards. The intention to remove the instance is written to the state file **before** the
+removal, and the restore checks whether the instance is really gone (and adds it back) or still
+there (and then restores the `SPCache` service like any other). If the graceful stop fails,
+SPSUpdate falls back to a normal stop of `SPCache` and logs a warning.
+
+> **Zero downtime patching caveat.** Enable `GracefulStopDistributedCache` only when you patch the
+> Distributed Cache servers **one at a time**. Do not run `ProductUpdate` in parallel on several
+> Distributed Cache hosts with this option, or the cache data cannot be replicated. With the
+> default `Basic` profile the option is ignored.
+
+`Test-SPSUpdateReadiness.ps1` validates both keys.
 
 ### `Binaries.Schedule` (optional)
 

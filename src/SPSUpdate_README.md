@@ -97,6 +97,14 @@ STS + WSSLOC language pair installed in order). Keep the binaries on a local pat
 server: running the `.exe` from a UNC share triggers a blocking *Open File - Security Warning*
 prompt unless the file server is in the Intranet zone (see the wiki `Configuration` page).
 
+`ServiceShutdownProfile` (`'Basic'` by default, or `'Extended'`) selects which services are stopped
+when `ShutdownServices` is `$true`. `Extended` stops, in order, `SPTimerV4`, `SPTraceV4`,
+`SPAdminV4`, `W3SVC`, `OSearch16`, `SPSearchHostController` and `SPCache`, only when they exist and
+run on the server, and saves their state first so an interrupted run can be repaired (the next
+`ProductUpdate` does it, or `Restore-SPSUpdateServices -StateFolder`). `GracefulStopDistributedCache` (Extended only, default `$false`)
+stops the Distributed Cache host gracefully; patch one Distributed Cache server at a time. See the
+wiki `Configuration` page for the details.
+
 #### UpgradeContentDatabase and MountContentDatabase
 
 `UpgradeContentDatabase` runs `Upgrade-SPContentDatabase` in parallel (4 sequences) for
@@ -153,7 +161,7 @@ This will:
 
 - Unblock the cumulative update file(s) if blocked
 - Run `Start-SPSProductUpdate` for each setup file (optionally stopping/restoring services
-  when `ShutdownServices` is `$true`)
+  when `ShutdownServices` is `$true`, following `ServiceShutdownProfile`)
 
 `ProductUpdate` runs the SharePoint installer locally and does **not** require the
 `InstallAccount` parameter.

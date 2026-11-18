@@ -85,6 +85,19 @@
         # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $true
         ShutdownServices = $true
 
+        # ServiceShutdownProfile : which services are stopped when ShutdownServices is on.
+        # Basic    : SPSearchHostController, SPTimerV4, IISADMIN, OSearch16 + iisreset (historical).
+        # Extended : ordered stop of SPTimerV4, SPTraceV4, SPAdminV4, W3SVC, OSearch16,
+        #            SPSearchHostController and SPCache. Only the services that exist and run on
+        #            the server are touched, so it follows the role of each server.
+        # Possible values : 'Basic' | 'Extended'.   Default if omitted: 'Basic'
+        ServiceShutdownProfile = 'Basic'
+
+        # GracefulStopDistributedCache : Extended only. Gracefully stop the Distributed Cache
+        # host (zero downtime patching). Patch ONE Distributed Cache server at a time.
+        # Possible values : $true | $false (1 | 0 also accepted).   Default if omitted: $false
+        GracefulStopDistributedCache = $false
+
         # Schedule : OPTIONAL window restricting WHEN the binary install may run. Omit to
         # allow the install at any time. Days is a list of short day names; Time is a
         # same-day window '<start> to <end>'. Both are optional and independent.

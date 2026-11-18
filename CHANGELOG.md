@@ -5,6 +5,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional **`Extended` service shutdown profile** for `-Action ProductUpdate`, to cut the extended install time of cumulative updates on SharePoint Server Subscription Edition. `Binaries.ServiceShutdownProfile = 'Extended'` stops, in the order recommended by Stefan Gossner, `SPTimerV4`, `SPTraceV4`, `SPAdminV4`, `W3SVC`, `OSearch16`, `SPSearchHostController` and `SPCache`, and restarts them in reverse order. Only the services that exist and are running on the server are touched, so it follows the role of each server. `Basic` (default) keeps the historical list (`SPSearchHostController`, `SPTimerV4`, `IISADMIN`, `OSearch16` + `iisreset`), so existing configurations behave as before. `Binaries.GracefulStopDistributedCache` (Extended only, default `$false`) gracefully stops the Distributed Cache host for zero downtime patching, with a fallback to a normal stop. Both keys are validated at load time and by `Test-SPSUpdateReadiness.ps1`; the wiki documents them. ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+- New public functions `Stop-SPSUpdateServices` and `Restore-SPSUpdateServices`. The service state is now saved to `Results\SPSUpdate-ServicesState_<server>_<date>.json` **before** the first service is stopped, and a service that cannot be stopped or restored raises a warning and an event log entry. ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+
+### Fixed
+
+- `-Action ProductUpdate` no longer leaves SharePoint services **disabled and stopped** when the installer fails (non-zero exit code other than 17022/17025), when the shutdown itself fails half way, or when the run is interrupted: the services are restored in a `finally` block, and the next `ProductUpdate` restores them from the state file of an interrupted run before anything else (also when the package is already installed or outside the install window; `Restore-SPSUpdateServices -StateFolder` does it by hand). If that restore fails, the shutdown stops with an error and keeps the file rather than recording services that are still disabled as their original state. The state file is written atomically, the exit code of `iisreset` is checked, and the removal of the Distributed Cache instance is recorded before it is done and reconciled by the restore (its startup type is put back after the instance is added again). When the services cannot be fully restored after the install, the installer exit code is kept (a required reboot stays recorded) but the server is reported as Failed and no automatic reboot is started; an interrupted update that cannot be repaired stops the next run before it installs anything (the server is reported as Failed and no schedule or reboot is processed). A second `ProductUpdate` started while one is running on the same server no longer restores the services or deletes the recovery file of the first: the state file records its owner process and the second run refuses to start. ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+
 ## [5.4.0] - 2026-11-09
 
 ### Changed

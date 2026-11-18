@@ -9,13 +9,38 @@
 
         [Parameter(Mandatory = $true)]
         [System.Boolean]
-        $ShutdownServices
+        $ShutdownServices,
+
+        [Parameter()]
+        [ValidateSet('Basic', 'Extended')]
+        [System.String]
+        $ServiceShutdownProfile = 'Basic',
+
+        [Parameter()]
+        [System.Boolean]
+        $GracefulStopDistributedCache = $false,
+
+        # Set to $true when the services could not be fully restored after the install. The exit code of the
+        # installer is still returned, so a required reboot is not lost: the caller decides what to report.
+        [Parameter()]
+        [ref]
+        $ServiceRecoveryFailed
     )
 
     Write-Verbose -Message "Getting install status of SP binaries"
     Write-Verbose -Message "Check if the setup file exists"
     if (-Not (Test-Path -Path $SetupFile)) {
         Throw "ERROR: Setup files could not be found: $SetupFile"
+    }
+
+    # Repair a previous interrupted update first, whatever this run does: services left disabled and stopped
+    # must not wait for the next package that needs an install.
+    $serviceStateFolder = if ([string]::IsNullOrEmpty($script:ModuleRoot)) { Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath 'SPSUpdate' }
+    else { Join-Path -Path (Split-Path -Parent (Split-Path -Parent $script:ModuleRoot)) -ChildPath 'Results' }
+    if (-not (Restore-SPSUpdateServices -StateFolder $serviceStateFolder)) {
+        $recoveryMessage = "The services of an interrupted ProductUpdate could not be restored (state files in $serviceStateFolder). The update was not started. Fix the problem and run Restore-SPSUpdateServices -StateFolder '$serviceStateFolder'."
+        Add-SPSUpdateEvent -Message $recoveryMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+        throw $recoveryMessage
     }
 
     Write-Verbose -Message "Checking file status of $SetupFile"
@@ -57,70 +82,49 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
     if ($versionInfo -lt $fileVersionInfo) {
         # Version of SharePoint is lower than the patch version. Patch is not installed.
         Write-Verbose -Message "The version of SharePoint installed is lower than the update. Starting update process."
-        if ($ShutdownServices) {
-            # Subscription Edition search service instance is OSearch16.
-            $listOfServices = @("SPSearchHostController", "SPTimerV4", "IISADMIN", "OSearch16")
-            Write-Verbose -Message "Gettings services status before stopping services for installation."
-            $servicesStatusFilePath = Join-Path -Path $PSScriptRoot -ChildPath "ServicesStatus_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMddHHmmss').json"
-            Get-Service -Name $listOfServices -ErrorAction SilentlyContinue | Select-Object Name, StartType, Status | ConvertTo-Json | Set-Content -Path $servicesStatusFilePath -Force
-            Write-Verbose -Message "Services status saved to $servicesStatusFilePath"
-            Write-Verbose -Message "Stopping services to speed up installation process"
-            foreach ($service in $listOfServices) {
-                Write-Verbose -Message "Stopping service: $service - Setting startup type to disabled"
-                Set-Service -Name $service -StartupType Disabled -ErrorAction SilentlyContinue
-                Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+        # The state path is known before the first service is touched, so the finally block can restore the
+        # services even when the shutdown itself fails half way.
+        $serviceStatePath = Get-SPSServiceStatePath -StateFolder $serviceStateFolder
+        try {
+            if ($ShutdownServices) {
+                Write-Verbose -Message "Stopping services to speed up installation process (profile $ServiceShutdownProfile)"
+                $null = Stop-SPSUpdateServices -ShutdownProfile $ServiceShutdownProfile `
+                    -GracefulStopDistributedCache $GracefulStopDistributedCache `
+                    -StateFolder $serviceStateFolder `
+                    -StatePath $serviceStatePath
             }
-            write-Verbose -Message "All services stopped. Starting installation process."
-            $null = Start-Process -FilePath "iisreset.exe" `
-                -ArgumentList "-stop -noforce" `
-                -Wait `
-                -PassThru
 
-
-        }
-
-        $setupInstall = Start-Process -FilePath $SetupFile -ArgumentList '/passive' -Wait -PassThru
-        # Error codes: https://aka.ms/installerrorcodes
-        switch ($setupInstall.ExitCode) {
-            0 {
-                Write-Verbose -Message "SharePoint update binary installation complete."
-            }
-            17022 {
-                Write-Verbose -Message ("SharePoint update binary installation complete, however a reboot is required.")
-            }
-            17025 {
-                Write-Verbose -Message ("The SharePoint update was already installed on your system." + `
-                        "Please report an issue about this behavior at https://github.com/dsccommunity/SharePointDsc")
-            }
-            Default {
-                $catchMessage = @"
+            $setupInstall = Start-Process -FilePath $SetupFile -ArgumentList '/passive' -Wait -PassThru
+            # Error codes: https://aka.ms/installerrorcodes
+            switch ($setupInstall.ExitCode) {
+                0 {
+                    Write-Verbose -Message "SharePoint update binary installation complete."
+                }
+                17022 {
+                    Write-Verbose -Message ("SharePoint update binary installation complete, however a reboot is required.")
+                }
+                17025 {
+                    Write-Verbose -Message ("The SharePoint update was already installed on your system." + `
+                            "Please report an issue about this behavior at https://github.com/dsccommunity/SharePointDsc")
+                }
+                Default {
+                    $catchMessage = @"
 SharePoint update install failed, exit code was $($setupInstall.ExitCode).
 Error codes can be found at https://aka.ms/installerrorcodes
 "@
-                Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
-                throw $catchMessage
+                    Add-SPSUpdateEvent -Message $catchMessage -Source 'Start-SPSProductUpdate' -EntryType 'Error'
+                    throw $catchMessage
+                }
             }
         }
-        if ($ShutdownServices) {
-            Write-Verbose -Message "Getting services status from json configuration."
-            $servicesStatusFromFile = Get-Content -Path $servicesStatusFilePath -Raw | ConvertFrom-Json
-            foreach ($service in $servicesStatusFromFile) {
-                Write-Verbose -Message "Service: $($service.Name) - Startup Type before installation: $($service.StartType) - Status before installation: $($service.Status)"
-                if ($service.Status -ne "Running") {
-                    Write-Verbose -Message "Service: $($service.Name) was not running before installation. Keeping it stopped."
-                    Set-Service -Name $service.Name -StartupType $service.StartType -ErrorAction SilentlyContinue
-                }
-                else {
-                    Write-Verbose -Message "Service: $($service.Name) was running before installation. Restoring its startup type."
-                    Set-Service -Name $service.Name -StartupType $service.StartType -ErrorAction SilentlyContinue
-                    Start-Service -Name $service.Name -ErrorAction SilentlyContinue
+        finally {
+            # Always put the services back, also when the installer or the shutdown itself failed: the state
+            # file is written before the first change, so its presence says that something has to be restored.
+            if ($ShutdownServices -and (Test-Path -Path $serviceStatePath)) {
+                if (-not (Restore-SPSUpdateServices -Path $serviceStatePath) -and $null -ne $ServiceRecoveryFailed) {
+                    $ServiceRecoveryFailed.Value = $true
                 }
             }
-            Start-Process -FilePath "iisreset.exe" `
-                -ArgumentList "-start" `
-                -Wait `
-                -PassThru | Out-Null
-            write-Verbose -Message "All services started. Installation process complete."
         }
         return [int]$setupInstall.ExitCode
     }
