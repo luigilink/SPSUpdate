@@ -5,33 +5,69 @@
 
         .DESCRIPTION
         Reads a service state file and, in the stored order, puts back each service's startup type and
-        starts the ones that were running before the update. A Distributed Cache host that was stopped
-        gracefully is added back with Add-SPDistributedCacheServiceInstance. IIS is started again when
-        the Basic profile stopped it with iisreset.
+        starts the ones that were running before the update. IIS is started again when the Basic profile
+        stopped it with iisreset (its exit code is checked).
+
+        A Distributed Cache host for which a graceful stop was attempted is reconciled: when its service
+        instance was removed from the farm, it is added back with Add-SPDistributedCacheServiceInstance;
+        when the instance is still there, the SPCache service is restored like any other service.
 
         Every failure raises a warning and an event log entry, and the remaining services are still
-        restored. The state file is deleted only when everything was restored, so a failed restore can
-        be retried. Use it by hand to repair a server after an interrupted update:
+        restored. A state file is deleted only when everything was restored, so a failed restore can be
+        retried.
 
-        Restore-SPSUpdateServices -Path 'F:\SCRIPTS\SPSUpdate\Results\SPSUpdate-ServicesState_APP1_<date>.json'
+        With -StateFolder, every state file of this computer in the folder is restored, oldest first. This
+        repairs a server after an interrupted update, and ProductUpdate does it before anything else:
+
+        Restore-SPSUpdateServices -StateFolder 'F:\SCRIPTS\SPSUpdate\Results'
 
         .PARAMETER Path
-        Path of the state file.
+        Path of one state file.
+
+        .PARAMETER StateFolder
+        Folder that holds the state files of Stop-SPSUpdateServices.
 
         .OUTPUTS
-        $true when every service was restored, otherwise $false.
+        $true when every service was restored (or there was nothing to restore), otherwise $false.
     #>
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, DefaultParameterSetName = 'Path')]
     [OutputType([System.Boolean])]
     param
     (
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Path')]
         [System.String]
-        $Path
+        $Path,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Folder')]
+        [System.String]
+        $StateFolder
     )
+
+    if ($PSCmdlet.ParameterSetName -eq 'Folder') {
+        if (-not (Test-Path -Path $StateFolder)) {
+            return $true
+        }
+        if (-not $PSCmdlet.ShouldProcess($StateFolder, 'Restore the services of an interrupted update')) {
+            return $true
+        }
+        $stateFiles = @(Get-ChildItem -Path $StateFolder -Filter "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_*.json" -File -ErrorAction SilentlyContinue | Sort-Object -Property Name)
+        $allRestored = $true
+        foreach ($stateFile in $stateFiles) {
+            $foundMessage = "A service state file from an interrupted ProductUpdate was found ($($stateFile.FullName)). Restoring the services."
+            Write-Warning -Message $foundMessage
+            Add-SPSUpdateEvent -Message $foundMessage -Source 'Restore-SPSUpdateServices' -EntryType 'Warning'
+            if (-not (Restore-SPSUpdateServices -Path $stateFile.FullName)) {
+                $allRestored = $false
+            }
+        }
+        return $allRestored
+    }
 
     if (-not (Test-Path -Path $Path)) {
         throw "Service state file not found: $Path"
+    }
+    if (-not $PSCmdlet.ShouldProcess($Path, 'Restore the services saved before the update')) {
+        return $true
     }
 
     $state = Get-Content -Path $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -43,18 +79,30 @@
         if ($null -eq $service -or [string]::IsNullOrEmpty("$($service.Name)")) { continue }
         Write-Verbose -Message "Service: $($service.Name) - Startup type before installation: $($service.StartType) - Status before installation: $($service.Status)"
 
-        if ($service.PSObject.Properties.Name -contains 'Graceful' -and [bool]$service.Graceful) {
+        if ($service.PSObject.Properties.Name -contains 'GracefulAttempted' -and [bool]$service.GracefulAttempted) {
+            # The removal of the instance was decided before it was done: find out whether it happened.
+            $instanceMissing = $true
             try {
-                Write-Verbose -Message 'Adding the Distributed Cache service instance back.'
-                Add-SPDistributedCacheServiceInstance -ErrorAction Stop
+                $existing = @(Get-SPServiceInstance -Server $env:COMPUTERNAME -ErrorAction Stop | Where-Object { $_.TypeName -eq 'Distributed Cache' })
+                if ($existing.Count -gt 0) { $instanceMissing = $false }
             }
             catch {
-                $failures++
-                $message = "Could not add the Distributed Cache service instance back after the update: $($_.Exception.Message)"
-                Write-Warning -Message $message
-                Add-SPSUpdateEvent -Message $message -Source 'Restore-SPSUpdateServices' -EntryType 'Error'
+                Write-Verbose -Message "Could not read the Distributed Cache service instance: $($_.Exception.Message). Assuming it was removed."
             }
-            continue
+            if ($instanceMissing) {
+                try {
+                    Write-Verbose -Message 'Adding the Distributed Cache service instance back.'
+                    Add-SPDistributedCacheServiceInstance -ErrorAction Stop
+                }
+                catch {
+                    $failures++
+                    $message = "Could not add the Distributed Cache service instance back after the update: $($_.Exception.Message)"
+                    Write-Warning -Message $message
+                    Add-SPSUpdateEvent -Message $message -Source 'Restore-SPSUpdateServices' -EntryType 'Error'
+                }
+                continue
+            }
+            Write-Verbose -Message 'The Distributed Cache service instance is still in the farm: restoring the SPCache service like the others.'
         }
 
         try {
@@ -84,7 +132,18 @@
     }
 
     if ($iisReset) {
-        $null = Start-Process -FilePath 'iisreset.exe' -ArgumentList '-start' -Wait -PassThru
+        try {
+            $iis = Start-Process -FilePath 'iisreset.exe' -ArgumentList '-start' -Wait -PassThru -ErrorAction Stop
+            if ($null -ne $iis -and $iis.ExitCode -ne 0) {
+                throw "iisreset -start exited with code $($iis.ExitCode)"
+            }
+        }
+        catch {
+            $failures++
+            $message = "Could not start IIS again after the update: $($_.Exception.Message)"
+            Write-Warning -Message $message
+            Add-SPSUpdateEvent -Message $message -Source 'Restore-SPSUpdateServices' -EntryType 'Error'
+        }
     }
 
     if ($failures -eq 0) {

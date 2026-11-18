@@ -176,15 +176,19 @@ restarted in the reverse order.
   stopped is left stopped.
 - **The state is saved first.** Before the first service is stopped, the startup type and status
   of every service that will be changed is written to
-  `Results\SPSUpdate-ServicesState_<server>_<date>.json`. The services are restored in a
-  `finally` block, so they come back **even if the installer fails**. The file is deleted once
-  everything is restored.
+  `Results\SPSUpdate-ServicesState_<server>_<date>.json` (written aside and then moved in place, so
+  it is never half written). The services are restored in a `finally` block, so they come back
+  **even if the installer or the shutdown itself fails**. The file is deleted once everything is
+  restored, IIS included (the exit code of `iisreset` is checked).
 - **Interrupted run (crash, server killed).** The next `ProductUpdate` on that server restores
-  the services from the leftover file before doing anything else. You can also do it by hand:
+  the services from the leftover file **before anything else**, even when the package is already
+  installed or the run is outside the install window. If that restore fails, the shutdown stops
+  with an error and keeps the file, instead of taking a new snapshot of services that are still
+  disabled. You can also repair a server by hand:
 
   ```powershell
   Import-Module .\Modules\SPSUpdate.Common\SPSUpdate.Common.psd1
-  Restore-SPSUpdateServices -Path 'F:\SCRIPTS\SPSUpdate\Results\SPSUpdate-ServicesState_APP1_20261118153000123.json'
+  Restore-SPSUpdateServices -StateFolder 'F:\SCRIPTS\SPSUpdate\Results'
   ```
 - **Errors are not silent.** A service that cannot be stopped or restored raises a warning and an
   entry in the `SPSUpdate` event log. The install continues when a stop fails (it is only
@@ -193,8 +197,10 @@ restarted in the reverse order.
 **`GracefulStopDistributedCache`** (`Extended` only, default `$false`) stops the Distributed
 Cache host gracefully (`Stop-AFCacheHost -Graceful`, then `Remove-SPDistributedCacheServiceInstance`)
 so that the cache content is replicated to the other cache hosts, and adds the instance back
-afterwards. If the graceful stop fails, SPSUpdate falls back to a normal stop of `SPCache` and
-logs a warning.
+afterwards. The intention to remove the instance is written to the state file **before** the
+removal, and the restore checks whether the instance is really gone (and adds it back) or still
+there (and then restores the `SPCache` service like any other). If the graceful stop fails,
+SPSUpdate falls back to a normal stop of `SPCache` and logs a warning.
 
 > **Zero downtime patching caveat.** Enable `GracefulStopDistributedCache` only when you patch the
 > Distributed Cache servers **one at a time**. Do not run `ProductUpdate` in parallel on several

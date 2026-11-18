@@ -1,10 +1,11 @@
-﻿# Tests for Stop-SPSUpdateServices (service shutdown profiles, state file, role awareness).
+﻿# Tests for Stop-SPSUpdateServices (service shutdown profiles, state file, role awareness, recovery).
 # Services are simulated with a hashtable so the tests run cross-platform.
 
 BeforeAll {
     $repoRoot = Split-Path -Path $PSScriptRoot -Parent
     $script:StopPath = Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Public/Stop-SPSUpdateServices.ps1'
     $script:RestorePath = Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Public/Restore-SPSUpdateServices.ps1'
+    . (Join-Path -Path $repoRoot -ChildPath 'src/Modules/SPSUpdate.Common/Private/Get-SPSServiceStatePath.ps1')
     . $script:StopPath
     . $script:RestorePath
 
@@ -18,6 +19,7 @@ BeforeAll {
     function Stop-AFCacheHost { [CmdletBinding()] param([switch] $Graceful, [string] $ComputerName, [int] $CachePort) }
     function Remove-SPDistributedCacheServiceInstance { [CmdletBinding()] param() }
     function Add-SPDistributedCacheServiceInstance { [CmdletBinding()] param() }
+    function Get-SPServiceInstance { [CmdletBinding()] param([string] $Server) }
 
     $script:TmpDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('spsupd-svc-' + [guid]::NewGuid())
     New-Item -Path $script:TmpDir -ItemType Directory -Force | Out-Null
@@ -32,6 +34,7 @@ Describe 'Stop-SPSUpdateServices' {
         $script:Folder = Join-Path -Path $script:TmpDir -ChildPath ([guid]::NewGuid().ToString('N'))
         $script:Calls = New-Object System.Collections.ArrayList
         $script:StateExistedAtFirstStop = $null
+        $script:AttemptRecordedBeforeGraceful = $null
         $script:Svc = [ordered]@{
             SPTimerV4              = @{ StartType = 'Automatic'; Status = 'Running' }
             SPTraceV4              = @{ StartType = 'Automatic'; Status = 'Running' }
@@ -51,12 +54,18 @@ Describe 'Stop-SPSUpdateServices' {
             $script:Svc[$Name].Status = 'Stopped'; [void]$script:Calls.Add("stop:$Name")
         }
         Mock Start-Service { $script:Svc[$Name].Status = 'Running'; [void]$script:Calls.Add("start:$Name") }
-        Mock Start-Process { [void]$script:Calls.Add("process:$FilePath $ArgumentList") }
+        Mock Start-Process { [void]$script:Calls.Add("process:$FilePath $ArgumentList"); [pscustomobject]@{ ExitCode = 0 } }
         Mock Add-SPSUpdateEvent { }
         Mock Use-SPCacheCluster { }
-        Mock Stop-AFCacheHost { [void]$script:Calls.Add('graceful-stop') }
+        Mock Stop-AFCacheHost {
+            $file = @(Get-ChildItem -Path $script:Folder -Filter 'SPSUpdate-ServicesState_*.json')[0]
+            $cache = (Get-Content -Path $file.FullName -Raw | ConvertFrom-Json).Services | Where-Object Name -eq 'SPCache'
+            $script:AttemptRecordedBeforeGraceful = [bool]$cache.GracefulAttempted
+            [void]$script:Calls.Add('graceful-stop')
+        }
         Mock Remove-SPDistributedCacheServiceInstance { [void]$script:Calls.Add('remove-dcache') }
         Mock Add-SPDistributedCacheServiceInstance { [void]$script:Calls.Add('add-dcache') }
+        Mock Get-SPServiceInstance { [pscustomobject]@{ TypeName = 'Distributed Cache' } }
     }
 
     It 'Basic keeps the historical service list and order, then stops IIS' {
@@ -108,6 +117,16 @@ Describe 'Stop-SPSUpdateServices' {
         $script:StateExistedAtFirstStop | Should -BeTrue
     }
 
+    It 'writes the state file at the path given by the caller, and leaves no temporary file behind' {
+        $path = Join-Path -Path $script:Folder -ChildPath 'SPSUpdate-ServicesState_CALLER_20260101000000000.json'
+        $r = Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder $script:Folder -StatePath $path
+
+        $r.Path | Should -Be $path
+        Test-Path -Path $path | Should -BeTrue
+        @(Get-ChildItem -Path $script:Folder -Filter '*.tmp').Count | Should -Be 0
+        { Get-Content -Path $path -Raw | ConvertFrom-Json } | Should -Not -Throw
+    }
+
     It 'stores the original startup type and status, in restore order (reversed for Extended)' {
         $r = Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder $script:Folder
         $state = Get-Content -Path $r.Path -Raw | ConvertFrom-Json
@@ -126,31 +145,35 @@ Describe 'Stop-SPSUpdateServices' {
         $state.IisReset | Should -BeTrue
     }
 
-    It 'stops the Distributed Cache gracefully when requested and records it' {
+    It 'records the intention to remove the Distributed Cache BEFORE the destructive calls' {
         $r = Stop-SPSUpdateServices -ShutdownProfile Extended -GracefulStopDistributedCache $true -StateFolder $script:Folder
         $state = Get-Content -Path $r.Path -Raw | ConvertFrom-Json
 
+        $script:AttemptRecordedBeforeGraceful | Should -BeTrue
         $script:Calls | Should -Contain 'graceful-stop'
         $script:Calls | Should -Contain 'remove-dcache'
         $script:Calls | Should -Not -Contain 'stop:SPCache'
-        ($state.Services | Where-Object Name -eq 'SPCache').Graceful | Should -BeTrue
+        ($state.Services | Where-Object Name -eq 'SPCache').GracefulAttempted | Should -BeTrue
     }
 
-    It 'falls back to a normal SPCache stop when the graceful stop fails' {
+    It 'falls back to a normal SPCache stop when the graceful stop fails, and keeps the attempt in the state' {
         Mock Stop-AFCacheHost { throw 'cluster unhealthy' }
         $r = Stop-SPSUpdateServices -ShutdownProfile Extended -GracefulStopDistributedCache $true -StateFolder $script:Folder
         $state = Get-Content -Path $r.Path -Raw | ConvertFrom-Json
 
         $script:Calls | Should -Contain 'stop:SPCache'
         $script:Calls | Should -Not -Contain 'remove-dcache'
-        ($state.Services | Where-Object Name -eq 'SPCache').Graceful | Should -BeFalse
+        ($state.Services | Where-Object Name -eq 'SPCache').GracefulAttempted | Should -BeTrue
         Should -Invoke Add-SPSUpdateEvent -ParameterFilter { $EntryType -eq 'Warning' -and $Message -like '*Graceful stop*' }
     }
 
     It 'does not use the graceful path when it is not requested' {
-        $null = Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder $script:Folder
+        $r = Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder $script:Folder
+        $state = Get-Content -Path $r.Path -Raw | ConvertFrom-Json
+
         $script:Calls | Should -Not -Contain 'graceful-stop'
         $script:Calls | Should -Contain 'stop:SPCache'
+        ($state.Services | Where-Object Name -eq 'SPCache').GracefulAttempted | Should -BeFalse
     }
 
     It 'warns, logs an event and keeps going when one service cannot be stopped' {
@@ -162,11 +185,18 @@ Describe 'Stop-SPSUpdateServices' {
         Should -Invoke Add-SPSUpdateEvent -ParameterFilter { $EntryType -eq 'Warning' -and $Message -like '*SPTraceV4*' }
     }
 
+    It 'warns when iisreset fails to stop IIS (non-zero exit code) and keeps going' {
+        Mock Start-Process { [void]$script:Calls.Add("process:$FilePath $ArgumentList"); [pscustomobject]@{ ExitCode = 1 } }
+        { Stop-SPSUpdateServices -ShutdownProfile Basic -StateFolder $script:Folder -WarningAction SilentlyContinue } | Should -Not -Throw
+
+        Should -Invoke Add-SPSUpdateEvent -ParameterFilter { $EntryType -eq 'Warning' -and $Message -like '*stop IIS*' }
+    }
+
     It 'restores the services of an interrupted previous run before taking the new snapshot' {
         # A crashed run left SPTimerV4 disabled and stopped; its state file holds the real original state.
         New-Item -Path $script:Folder -ItemType Directory -Force | Out-Null
         $leftover = Join-Path -Path $script:Folder -ChildPath "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_20260101000000000.json"
-        [pscustomobject]@{ Computer = 'X'; IisReset = $false; Services = @([pscustomobject]@{ Name = 'SPTimerV4'; StartType = 'Automatic'; Status = 'Running'; Graceful = $false }) } |
+        [pscustomobject]@{ Computer = 'X'; IisReset = $false; Services = @([pscustomobject]@{ Name = 'SPTimerV4'; StartType = 'Automatic'; Status = 'Running'; GracefulAttempted = $false }) } |
             ConvertTo-Json -Depth 4 | Set-Content -Path $leftover
         $script:Svc['SPTimerV4'].StartType = 'Disabled'
         $script:Svc['SPTimerV4'].Status = 'Stopped'
@@ -177,6 +207,23 @@ Describe 'Stop-SPSUpdateServices' {
         $state = Get-Content -Path $r.Path -Raw | ConvertFrom-Json
         ($state.Services | Where-Object Name -eq 'SPTimerV4').StartType | Should -Be 'Automatic'
         ($state.Services | Where-Object Name -eq 'SPTimerV4').Status | Should -Be 'Running'
+    }
+
+    It 'stops with an error, touches nothing and keeps the leftover file when the previous run cannot be restored' {
+        New-Item -Path $script:Folder -ItemType Directory -Force | Out-Null
+        $leftover = Join-Path -Path $script:Folder -ChildPath "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_20260101000000000.json"
+        [pscustomobject]@{ Computer = 'X'; IisReset = $false; Services = @([pscustomobject]@{ Name = 'SPTimerV4'; StartType = 'Automatic'; Status = 'Running'; GracefulAttempted = $false }) } |
+            ConvertTo-Json -Depth 4 | Set-Content -Path $leftover
+        $script:Svc['SPTimerV4'].StartType = 'Disabled'
+        $script:Svc['SPTimerV4'].Status = 'Stopped'
+        Mock Start-Service { throw 'service cannot start' }
+
+        { Stop-SPSUpdateServices -ShutdownProfile Basic -StateFolder $script:Folder -WarningAction SilentlyContinue } | Should -Throw '*could not be restored*'
+
+        Test-Path -Path $leftover | Should -BeTrue
+        @($script:Calls | Where-Object { $_ -like 'stop:*' }).Count | Should -Be 0
+        @(Get-ChildItem -Path $script:Folder -Filter 'SPSUpdate-ServicesState_*.json').Count | Should -Be 1
+        Should -Invoke Add-SPSUpdateEvent -ParameterFilter { $EntryType -eq 'Error' -and $Message -like '*could not be restored*' }
     }
 
     It 'ignores the legacy ServicesStatus_*.json files' {

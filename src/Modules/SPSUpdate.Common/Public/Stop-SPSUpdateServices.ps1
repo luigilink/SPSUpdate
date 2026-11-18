@@ -17,9 +17,13 @@
           (zero downtime patching) and falls back to a normal stop of SPCache if that fails.
 
         The original startup type and status of every service that is acted on is written to a JSON
-        state file BEFORE the first change, so an interrupted run can be repaired with
-        Restore-SPSUpdateServices. A state file left behind by a previous interrupted run on this
-        computer is restored first, so the snapshot always describes the real original state.
+        state file BEFORE the first change (the file is written aside and then moved in place, so it is
+        never half written). An interrupted run can be repaired with Restore-SPSUpdateServices. The
+        Distributed Cache removal is recorded in the file BEFORE it is attempted.
+
+        State files left behind by a previous interrupted run on this computer are restored first. When
+        that fails the function stops with an error and keeps the files: taking a new snapshot of
+        services that are still disabled would record the wrong original state.
 
         A service that cannot be disabled or stopped raises a warning and an event log entry; the
         install then continues (it is slower, not unsafe).
@@ -32,7 +36,11 @@
         Run it on one Distributed Cache server at a time.
 
         .PARAMETER StateFolder
-        Folder that receives the state file (created if missing).
+        Folder that receives the state file (created if missing) and is searched for leftover files.
+
+        .PARAMETER StatePath
+        Path of the state file to write. By default a new name is built in StateFolder. A caller that must
+        restore the services whatever happens passes its own path, so it knows the file before any change.
 
         .EXAMPLE
         $state = Stop-SPSUpdateServices -ShutdownProfile Extended -StateFolder 'F:\SCRIPTS\SPSUpdate\Results'
@@ -52,7 +60,11 @@
 
         [Parameter(Mandatory = $true)]
         [System.String]
-        $StateFolder
+        $StateFolder,
+
+        [Parameter()]
+        [System.String]
+        $StatePath
     )
 
     if (-not $PSCmdlet.ShouldProcess($env:COMPUTERNAME, "Stop the SharePoint services before the update (profile $ShutdownProfile)")) {
@@ -63,13 +75,12 @@
         New-Item -Path $StateFolder -ItemType Directory -Force | Out-Null
     }
 
-    # Repair a previous interrupted run first: its state file holds the real original state.
-    $leftovers = @(Get-ChildItem -Path $StateFolder -Filter "SPSUpdate-ServicesState_$($env:COMPUTERNAME)_*.json" -File -ErrorAction SilentlyContinue | Sort-Object -Property Name)
-    foreach ($leftover in $leftovers) {
-        $leftoverMessage = "A service state file from an interrupted ProductUpdate was found ($($leftover.FullName)). Restoring the services before continuing."
-        Write-Warning -Message $leftoverMessage
-        Add-SPSUpdateEvent -Message $leftoverMessage -Source 'Stop-SPSUpdateServices' -EntryType 'Warning'
-        $null = Restore-SPSUpdateServices -Path $leftover.FullName
+    # Repair a previous interrupted run first: its state file holds the real original state. A new
+    # snapshot of services that are still disabled would record the wrong state, so stop here instead.
+    if (-not (Restore-SPSUpdateServices -StateFolder $StateFolder)) {
+        $abortMessage = "The services of an interrupted ProductUpdate could not be restored (state files in $StateFolder). Fix the problem and run Restore-SPSUpdateServices -StateFolder '$StateFolder' before the next update."
+        Add-SPSUpdateEvent -Message $abortMessage -Source 'Stop-SPSUpdateServices' -EntryType 'Error'
+        throw $abortMessage
     }
 
     if ($ShutdownProfile -eq 'Extended') {
@@ -92,10 +103,10 @@
             continue
         }
         $targets.Add([PSCustomObject]@{
-                Name      = $name
-                StartType = "$($service.StartType)"
-                Status    = "$($service.Status)"
-                Graceful  = $false
+                Name              = $name
+                StartType         = "$($service.StartType)"
+                Status            = "$($service.Status)"
+                GracefulAttempted = $false
             })
     }
 
@@ -111,7 +122,9 @@
         if ($isBasic) { $restoreList.Add($target) } else { $restoreList.Insert(0, $target) }
     }
 
-    $statePath = Join-Path -Path $StateFolder -ChildPath ("SPSUpdate-ServicesState_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMddHHmmssfff').json")
+    if ([string]::IsNullOrEmpty($StatePath)) {
+        $StatePath = Get-SPSServiceStatePath -StateFolder $StateFolder
+    }
     $writeState = {
         $stateObject = [PSCustomObject]@{
             Computer        = "$($env:COMPUTERNAME)"
@@ -120,10 +133,13 @@
             IisReset        = $isBasic
             Services        = $restoreList.ToArray()
         }
-        ConvertTo-Json -InputObject $stateObject -Depth 4 | Set-Content -Path $statePath -Encoding UTF8 -ErrorAction Stop
+        # Written aside then moved in place: an interruption never leaves a half written state file.
+        $temporaryPath = "$StatePath.tmp"
+        ConvertTo-Json -InputObject $stateObject -Depth 4 | Set-Content -Path $temporaryPath -Encoding UTF8 -ErrorAction Stop
+        Move-Item -Path $temporaryPath -Destination $StatePath -Force -ErrorAction Stop
     }
     & $writeState
-    Write-Verbose -Message "Services status saved to $statePath"
+    Write-Verbose -Message "Services status saved to $StatePath"
 
     $stopped = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
     foreach ($target in $targets) {
@@ -135,11 +151,12 @@
                     Import-Module -Name (Join-Path -Path $env:CommonProgramFiles -ChildPath 'microsoft shared\Web Server Extensions\16\BIN\CacheModules\DistributedCacheAdministration\DistributedCacheAdministration') -ErrorAction Stop
                 }
                 Use-SPCacheCluster
+                # Record the intention BEFORE the destructive calls: the restore finds out what happened.
+                $target.GracefulAttempted = $true
+                & $writeState
                 Write-Verbose -Message 'Gracefully stopping the Distributed Cache host.'
                 Stop-AFCacheHost -Graceful -ComputerName $env:COMPUTERNAME -CachePort 22233 -ErrorAction Stop
                 Remove-SPDistributedCacheServiceInstance -ErrorAction Stop
-                $target.Graceful = $true
-                & $writeState
                 $stopped.Add($name)
                 continue
             }
@@ -164,10 +181,20 @@
     }
 
     if ($isBasic) {
-        $null = Start-Process -FilePath 'iisreset.exe' -ArgumentList '-stop -noforce' -Wait -PassThru
+        try {
+            $iis = Start-Process -FilePath 'iisreset.exe' -ArgumentList '-stop -noforce' -Wait -PassThru -ErrorAction Stop
+            if ($null -ne $iis -and $iis.ExitCode -ne 0) {
+                throw "iisreset -stop exited with code $($iis.ExitCode)"
+            }
+        }
+        catch {
+            $iisMessage = "Could not stop IIS before the update: $($_.Exception.Message). The installation continues but may take longer."
+            Write-Warning -Message $iisMessage
+            Add-SPSUpdateEvent -Message $iisMessage -Source 'Stop-SPSUpdateServices' -EntryType 'Warning'
+        }
     }
 
     Add-SPSUpdateEvent -Message "Services stopped before the update (profile $ShutdownProfile): $($stopped -join ', ')" -Source 'Stop-SPSUpdateServices' -EntryType 'Information'
     Write-Verbose -Message 'All services stopped. Starting installation process.'
-    return [PSCustomObject]@{ Path = $statePath; ShutdownProfile = $ShutdownProfile; Services = $stopped.ToArray() }
+    return [PSCustomObject]@{ Path = $StatePath; ShutdownProfile = $ShutdownProfile; Services = $stopped.ToArray() }
 }

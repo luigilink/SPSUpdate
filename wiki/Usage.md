@@ -59,8 +59,8 @@ installer runs and restored afterwards (also when the installer fails). If the i
 unusually long on Subscription Edition, set `Binaries.ServiceShutdownProfile = 'Extended'`: it
 stops the full ordered service list that fits the role of the server (see
 [Configuration](./Configuration#binariesserviceshutdownprofile-and-binariesgracefulstopdistributedcache-optional)).
-If a run is interrupted, the services are restored from the saved state file by the next run, or
-by hand with `Restore-SPSUpdateServices`.
+If a run is interrupted, the next `ProductUpdate` restores the services from the saved state file
+before anything else, or you can do it by hand with `Restore-SPSUpdateServices -StateFolder`.
 
 ### Example 6: InitContentDB (source farm)
 

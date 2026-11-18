@@ -1392,6 +1392,9 @@ Exception: $_
         }
     }
     'ProductUpdate' {
+        # Repair an interrupted previous update first (services left disabled and stopped), whatever the
+        # install window or the package say. -WhatIf is honoured by the function.
+        $null = Restore-SPSUpdateServices -StateFolder $pathResultsFolder
         # Optional install schedule gate (Binaries.Schedule). Outside the window, skip the
         # install entirely and fail closed on a malformed window.
         $installAllowed = $true

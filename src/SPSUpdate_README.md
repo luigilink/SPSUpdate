@@ -100,8 +100,8 @@ prompt unless the file server is in the Intranet zone (see the wiki `Configurati
 `ServiceShutdownProfile` (`'Basic'` by default, or `'Extended'`) selects which services are stopped
 when `ShutdownServices` is `$true`. `Extended` stops, in order, `SPTimerV4`, `SPTraceV4`,
 `SPAdminV4`, `W3SVC`, `OSearch16`, `SPSearchHostController` and `SPCache`, only when they exist and
-run on the server, and saves their state first so an interrupted run can be repaired
-(`Restore-SPSUpdateServices`). `GracefulStopDistributedCache` (Extended only, default `$false`)
+run on the server, and saves their state first so an interrupted run can be repaired (the next
+`ProductUpdate` does it, or `Restore-SPSUpdateServices -StateFolder`). `GracefulStopDistributedCache` (Extended only, default `$false`)
 stops the Distributed Cache host gracefully; patch one Distributed Cache server at a time. See the
 wiki `Configuration` page for the details.
 

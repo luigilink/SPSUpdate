@@ -27,6 +27,12 @@
         Throw "ERROR: Setup files could not be found: $SetupFile"
     }
 
+    # Repair a previous interrupted update first, whatever this run does: services left disabled and stopped
+    # must not wait for the next package that needs an install.
+    $serviceStateFolder = if ([string]::IsNullOrEmpty($script:ModuleRoot)) { Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath 'SPSUpdate' }
+    else { Join-Path -Path (Split-Path -Parent (Split-Path -Parent $script:ModuleRoot)) -ChildPath 'Results' }
+    $null = Restore-SPSUpdateServices -StateFolder $serviceStateFolder
+
     Write-Verbose -Message "Checking file status of $SetupFile"
     Write-Verbose -Message "Checking status now"
     try {
@@ -66,17 +72,18 @@ Setup file is blocked! Please use 'Unblock-File -Path $SetupFile' to unblock the
     if ($versionInfo -lt $fileVersionInfo) {
         # Version of SharePoint is lower than the patch version. Patch is not installed.
         Write-Verbose -Message "The version of SharePoint installed is lower than the update. Starting update process."
-        $serviceState = $null
-        if ($ShutdownServices) {
-            $serviceStateFolder = if ([string]::IsNullOrEmpty($script:ModuleRoot)) { Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath 'SPSUpdate' }
-            else { Join-Path -Path (Split-Path -Parent (Split-Path -Parent $script:ModuleRoot)) -ChildPath 'Results' }
-            Write-Verbose -Message "Stopping services to speed up installation process (profile $ServiceShutdownProfile)"
-            $serviceState = Stop-SPSUpdateServices -ShutdownProfile $ServiceShutdownProfile `
-                -GracefulStopDistributedCache $GracefulStopDistributedCache `
-                -StateFolder $serviceStateFolder
-        }
-
+        # The state path is known before the first service is touched, so the finally block can restore the
+        # services even when the shutdown itself fails half way.
+        $serviceStatePath = Get-SPSServiceStatePath -StateFolder $serviceStateFolder
         try {
+            if ($ShutdownServices) {
+                Write-Verbose -Message "Stopping services to speed up installation process (profile $ServiceShutdownProfile)"
+                $null = Stop-SPSUpdateServices -ShutdownProfile $ServiceShutdownProfile `
+                    -GracefulStopDistributedCache $GracefulStopDistributedCache `
+                    -StateFolder $serviceStateFolder `
+                    -StatePath $serviceStatePath
+            }
+
             $setupInstall = Start-Process -FilePath $SetupFile -ArgumentList '/passive' -Wait -PassThru
             # Error codes: https://aka.ms/installerrorcodes
             switch ($setupInstall.ExitCode) {
@@ -101,9 +108,10 @@ Error codes can be found at https://aka.ms/installerrorcodes
             }
         }
         finally {
-            # Always put the services back, also when the installer failed.
-            if ($null -ne $serviceState -and -not [string]::IsNullOrEmpty($serviceState.Path)) {
-                $null = Restore-SPSUpdateServices -Path $serviceState.Path
+            # Always put the services back, also when the installer or the shutdown itself failed: the state
+            # file is written before the first change, so its presence says that something has to be restored.
+            if ($ShutdownServices -and (Test-Path -Path $serviceStatePath)) {
+                $null = Restore-SPSUpdateServices -Path $serviceStatePath
             }
         }
         return [int]$setupInstall.ExitCode
