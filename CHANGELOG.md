@@ -5,6 +5,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional **`Extended` service shutdown profile** for `-Action ProductUpdate`, to cut the extended install time of cumulative updates on SharePoint Server Subscription Edition. `Binaries.ServiceShutdownProfile = 'Extended'` stops, in the order recommended by Stefan Gossner, `SPTimerV4`, `SPTraceV4`, `SPAdminV4`, `W3SVC`, `OSearch16`, `SPSearchHostController` and `SPCache`, and restarts them in reverse order. Only the services that exist and are running on the server are touched, so it follows the role of each server. `Basic` (default) keeps the historical list (`SPSearchHostController`, `SPTimerV4`, `IISADMIN`, `OSearch16` + `iisreset`), so existing configurations behave as before. `Binaries.GracefulStopDistributedCache` (Extended only, default `$false`) gracefully stops the Distributed Cache host for zero downtime patching, with a fallback to a normal stop. Both keys are validated at load time and by `Test-SPSUpdateReadiness.ps1`; the wiki documents them. ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+- New public functions `Stop-SPSUpdateServices` and `Restore-SPSUpdateServices`. The service state is now saved to `Results\SPSUpdate-ServicesState_<server>_<date>.json` **before** the first service is stopped, and a service that cannot be stopped or restored raises a warning and an event log entry. ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+
+### Fixed
+
+- `-Action ProductUpdate` no longer leaves SharePoint services **disabled and stopped** when the installer fails (non-zero exit code other than 17022/17025) or the run is interrupted: the services are restored in a `finally` block, and the next run restores the services from a state file left by an interrupted run before taking a new snapshot (`Restore-SPSUpdateServices` can also be run by hand). ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+
 ## [5.4.0] - 2026-11-09
 
 ### Changed

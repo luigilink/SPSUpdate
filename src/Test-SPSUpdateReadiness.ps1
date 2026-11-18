@@ -147,6 +147,31 @@ if ($null -ne $cfg) {
         else {
             Add-CheckResult -Section 'Config' -Name 'Binaries.SetupFullPath' -Status 'PASS' -Detail $cfg.Binaries.SetupFullPath
         }
+
+        # Service shutdown profile (used when ShutdownServices is on).
+        $readinessProfile = 'Basic'
+        if ($cfg.Binaries.Contains('ServiceShutdownProfile')) { $readinessProfile = "$($cfg.Binaries.ServiceShutdownProfile)".Trim() }
+        if ($readinessProfile -eq 'Basic' -or $readinessProfile -eq 'Extended') {
+            Add-CheckResult -Section 'Config' -Name 'Binaries.ServiceShutdownProfile' -Status 'PASS' -Detail $readinessProfile
+        }
+        else {
+            Add-CheckResult -Section 'Config' -Name 'Binaries.ServiceShutdownProfile' -Status 'FAIL' -Detail "'$readinessProfile' is not valid; use 'Basic' or 'Extended'"
+            $readinessProfile = 'Basic'
+        }
+        if ($cfg.Binaries.Contains('GracefulStopDistributedCache')) {
+            try {
+                $readinessGraceful = ConvertTo-SPSConfigBoolean -Value $cfg.Binaries.GracefulStopDistributedCache -PropertyName 'Binaries.GracefulStopDistributedCache'
+                if ($readinessGraceful -and $readinessProfile -ne 'Extended') {
+                    Add-CheckResult -Section 'Config' -Name 'Binaries.GracefulStopDistributedCache' -Status 'WARN' -Detail "Ignored: it only applies with ServiceShutdownProfile = 'Extended'"
+                }
+                elseif ($readinessGraceful) {
+                    Add-CheckResult -Section 'Config' -Name 'Binaries.GracefulStopDistributedCache' -Status 'WARN' -Detail 'Enabled: patch one Distributed Cache server at a time (zero downtime patching)'
+                }
+            }
+            catch {
+                Add-CheckResult -Section 'Config' -Name 'Binaries.GracefulStopDistributedCache' -Status 'FAIL' -Detail $_.Exception.Message
+            }
+        }
     }
     else {
         Add-CheckResult -Section 'Config' -Name 'Binaries block' -Status 'WARN' -Detail 'Missing (ProductUpdate defaults will apply)'

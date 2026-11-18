@@ -159,6 +159,22 @@ function Get-SPSUpdateConfiguration {
     else {
         $config.Binaries.ShutdownServices = ConvertTo-SPSConfigBoolean -Value $config.Binaries.ShutdownServices -PropertyName 'Binaries.ShutdownServices'
     }
+    # Service shutdown profile used when ShutdownServices is on: Basic (historical) or Extended.
+    if (-not $config.Binaries.ContainsKey('ServiceShutdownProfile')) {
+        $config.Binaries.ServiceShutdownProfile = 'Basic'
+    }
+    else {
+        $shutdownProfile = "$($config.Binaries.ServiceShutdownProfile)".Trim()
+        if ($shutdownProfile -eq 'Basic') { $config.Binaries.ServiceShutdownProfile = 'Basic' }
+        elseif ($shutdownProfile -eq 'Extended') { $config.Binaries.ServiceShutdownProfile = 'Extended' }
+        else { throw "Configuration property 'Binaries.ServiceShutdownProfile' must be 'Basic' or 'Extended' (found '$($config.Binaries.ServiceShutdownProfile)')." }
+    }
+    if (-not $config.Binaries.ContainsKey('GracefulStopDistributedCache')) {
+        $config.Binaries.GracefulStopDistributedCache = $false
+    }
+    else {
+        $config.Binaries.GracefulStopDistributedCache = ConvertTo-SPSConfigBoolean -Value $config.Binaries.GracefulStopDistributedCache -PropertyName 'Binaries.GracefulStopDistributedCache'
+    }
 
     # Apply content-database defaults
     if (-not $config.ContainsKey('MountContentDatabase')) {
@@ -1417,6 +1433,8 @@ Running ProductUpdate with following parameters:
 SharePoint Server: $($spTargetServer)
 Setup File Path: $($fullSetupFilePath)
 Shutdown Services: $($envCfg.Binaries.ShutdownServices)
+Service Shutdown Profile: $($envCfg.Binaries.ServiceShutdownProfile)
+Graceful Stop Distributed Cache: $($envCfg.Binaries.GracefulStopDistributedCache)
 "@
                 Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -State 'Running' -Item $setupFile -ItemState 'Running' -ItemDetail 'installing'
                 Write-SPSDashboard
@@ -1435,7 +1453,9 @@ Shutdown Services: $($envCfg.Binaries.ShutdownServices)
                 }
                 # Unblock setup file if it is blocked
                 Unblock-File -Path $fullSetupFilePath -Verbose
-                $puExitCode = Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices -Verbose
+                $puExitCode = Start-SPSProductUpdate -SetupFile $fullSetupFilePath -ShutdownServices $envCfg.Binaries.ShutdownServices `
+                    -ServiceShutdownProfile $envCfg.Binaries.ServiceShutdownProfile `
+                    -GracefulStopDistributedCache $envCfg.Binaries.GracefulStopDistributedCache -Verbose
                 if ($null -eq $puExitCode) {
                     # No install happened: already at or above the patch level.
                     Write-SPSStatus -Scope 'ProductUpdate' -Phase 'ProductUpdate' -Item $setupFile -ItemState 'Done' -ItemDetail 'already installed'

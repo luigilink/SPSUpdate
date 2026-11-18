@@ -54,6 +54,14 @@ logic lives in the `SPSUpdate.Common` module; the script just orchestrates it.
 .\SPSUpdate.ps1 -ConfigFile 'CONTOSO-PROD-CONTENT.psd1' -Action ProductUpdate
 ```
 
+With `Binaries.ShutdownServices = $true` the SharePoint and IIS services are stopped before the
+installer runs and restored afterwards (also when the installer fails). If the install takes
+unusually long on Subscription Edition, set `Binaries.ServiceShutdownProfile = 'Extended'`: it
+stops the full ordered service list that fits the role of the server (see
+[Configuration](./Configuration#binariesserviceshutdownprofile-and-binariesgracefulstopdistributedcache-optional)).
+If a run is interrupted, the services are restored from the saved state file by the next run, or
+by hand with `Restore-SPSUpdateServices`.
+
 ### Example 6: InitContentDB (source farm)
 
 ```powershell
