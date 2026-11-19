@@ -1,53 +1,63 @@
 # SPSUpdate - Release Notes
 
-## [5.4.0] - 2026-11-09
+## [5.5.0] - 2026-11-19
 
-SPSUpdate 5.4.0 hardens a cumulative-update campaign on a real farm. It was validated on a
-four-server Subscription Edition farm (October 2026 CU, 18 content databases): binaries on every
-server, Configuration Wizard, parallel database upgrade, and a dashboard that reaches 100 %.
+SPSUpdate 5.5.0 adds an optional service shutdown profile that shortens the installation of a
+cumulative update on SharePoint Server Subscription Edition, and makes the service handling around
+the installer safe.
 
-There is no change to the `.psd1` configuration or to the package layout: copy the new files over
-the existing ones.
+It was validated on a four-server Subscription Edition farm with the November 2026 CU (KB5002945,
+`16.0.20326.20278`): two application servers with search and two front-ends with the Distributed
+Cache. The binaries took **18 to 25 minutes per server** (installer, service shutdown and restore
+included), the 18 content databases were upgraded in about 6 minutes, the whole `Default` run took
+24 minutes and the dashboard ended at 100 %. The `.psd1` configuration stays compatible: the new
+keys are optional and the default behaviour is unchanged.
+
+### Added
+
+- **`Extended` service shutdown profile.** On Subscription Edition the installer can take hours when
+  the SharePoint and IIS services are still running (files in use in the GAC). With
+  `Binaries.ShutdownServices = $true`, `Binaries.ServiceShutdownProfile = 'Extended'` stops, in the
+  order recommended by Stefan Gossner, `SPTimerV4`, `SPTraceV4`, `SPAdminV4`, `W3SVC`, `OSearch16`,
+  `SPSearchHostController` and `SPCache`, and restarts them in reverse order. Only the services that
+  exist and run on the server are touched, so it follows the role of each server. `Basic` (the
+  default) keeps the historical list, so existing configurations behave as before.
+  ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+- **Graceful Distributed Cache stop.** `Binaries.GracefulStopDistributedCache` (Extended only,
+  default `$false`) gracefully stops the Distributed Cache host for zero downtime patching, with a
+  fallback to a normal stop. Patch one Distributed Cache server at a time.
+  ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+- New public functions `Stop-SPSUpdateServices` and `Restore-SPSUpdateServices`. The original state
+  of the services is saved to `Results\SPSUpdate-ServicesState_<server>_<date>.json` **before** the
+  first service is stopped, and a service that cannot be stopped or restored raises a warning and an
+  event log entry. ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
 
 ### Fixed
 
-- **SideBySide token: transient update conflicts are retried.** `Set-SPSSideBySideToken` no longer
-  fails on the first `SPWebService.Update()` conflict raised while `PSCONFIG` is writing to the
-  configuration database. It retries with a bounded policy (6 attempts, 15 seconds apart),
-  reloading the web service between attempts. Only update conflicts are retried; any other error
-  still fails immediately, and a conflict that persists through the budget is reported as a failure.
-  ([#79](https://github.com/luigilink/SPSUpdate/issues/79))
-- **Content databases added after `InitContentDB` are no longer silently ignored.** The cached
-  inventory was never compared with SharePoint, so a database created later was missing from the
-  dashboard and from the mount/upgrade sequences. The new public function
-  `Compare-SPSContentDbInventory` now backs two checks: the Default master run logs a warning and
-  an event-log entry listing the attached databases missing from the inventory, and
-  `Test-SPSUpdateReadiness.ps1` reports the same as a WARN (it reads the inventory from the script
-  `Config` folder, like `SPSUpdate.ps1`). Inventory databases that are not attached are only
-  reported, since they are expected for an inventory imported from a source farm; do not regenerate
-  such an inventory. `-Action InitContentDB` now also refreshes the content database list of an
-  existing campaign dashboard. ([#85](https://github.com/luigilink/SPSUpdate/issues/85))
-- **Dashboard: a server is no longer counted twice in `Done / Skipped`.** A completed reboot is not
-  a separate unit anymore (it stays visible as the *Rebooted* pill), while a pending, running or
-  failed reboot still counts so a campaign cannot show a false 100 %.
-  ([#86](https://github.com/luigilink/SPSUpdate/issues/86))
-
-### Changed
-
-- **Dashboard completion percentage.** A `Running` unit now counts as half a unit, and the blue arc
-  of the ring uses the same weight, so the percentage moves during the binary installation instead
-  of staying at `0%`. 100 % and the green colour remain reserved for a campaign where every unit is
-  Done or Skipped. ([#83](https://github.com/luigilink/SPSUpdate/issues/83))
-- **Documentation.** The wiki `Configuration` page explains how to run the cumulative update from a
-  UNC share without the interactive *Open File - Security Warning* prompt (Local intranet zone by
-  GPO or registry); keeping the binaries on a local drive remains the recommendation.
-  ([#81](https://github.com/luigilink/SPSUpdate/issues/81))
-
-### Known issue
-
-- The Patch Status shown on the Binaries card right after `-Action ProductUpdate` can be stale
-  (the configuration-database cache is not refreshed by a local install). Run `Get-SPProduct -Local`
-  on the server, or let the Default run refresh it. A fix is pending a live validation.
+- **Services are no longer left disabled and stopped.** `-Action ProductUpdate` restores the services
+  when the installer fails, when the shutdown itself fails half way, or when the run is interrupted.
+  The next `ProductUpdate` restores them from the saved state file before anything else (also when the
+  package is already installed or outside the install window), and `Restore-SPSUpdateServices
+  -StateFolder` does it by hand. If the restore fails, the server is reported as Failed and no
+  automatic reboot is started; a second `ProductUpdate` started while one is running on the same
+  server refuses to start instead of touching its services.
+  ([#90](https://github.com/luigilink/SPSUpdate/issues/90))
+- **Stale Patch Status after an install.** `-Action ProductUpdate` refreshes the local product cache
+  (`Get-SPProduct -Local`) before reading the Patch Status, so the Binaries card no longer keeps the
+  pre-install value. The status can still change afterwards as the farm settles (for example from
+  `Upgrade Blocked` to `Upgrade Available`), and the `Default` run reads it again.
   ([#71](https://github.com/luigilink/SPSUpdate/issues/71))
+
+### Upgrade notes
+
+- Keep the update binaries on a **local drive** of each server. Running the `.exe` from a UNC share
+  shows an interactive security prompt after the services have been stopped; the wiki explains how
+  to avoid it.
+- Exclude the SharePoint folders from the antivirus real-time scan during the installation.
+- Try `Extended` on one server first and note the duration. `GracefulStopDistributedCache` is
+  meant for farms with several Distributed Cache hosts, patched one at a time.
+- Not yet exercised on a live farm: the recovery after an interrupted update (covered by tests), and
+  the retry of SideBySide update conflicts introduced in 5.4.0 (it only happens while PSCONFIG writes
+  to the configuration database).
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md)
